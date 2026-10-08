@@ -14,6 +14,7 @@ import type { LogLevel } from './logger.js';
 import { Router } from './router.js';
 import { registerApiRoutes } from './api.js';
 import { checkToken, sendError } from './http-util.js';
+import { Gateway } from './gateway/gateway.js';
 
 export const DAEMON_VERSION = '0.1.0';
 
@@ -54,6 +55,7 @@ export class Daemon {
   readonly store: Store;
   readonly logger: Logger;
   readonly sync: SyncEngine;
+  readonly gateway: Gateway;
   config!: ManagerConfig;
   readonly router = new Router();
 
@@ -77,6 +79,7 @@ export class Daemon {
     this.opts = opts;
     this.store = new Store(opts.homeDir);
     this.logger = new Logger(path.join(this.store.logsDir, 'daemon.log'));
+    this.gateway = new Gateway(this);
     const agentRoot = opts.agentConfigRoot ?? process.env['MCP_MANAGER_AGENT_HOME'];
     this.sync = new SyncEngine({
       backupsDir: this.store.backupsDir,
@@ -130,12 +133,17 @@ export class Daemon {
       await this.saveConfig();
     }
 
+    // 网关钩子常驻挂载；运行时开关见 /api/gateway/start|stop
+    this.gateway.attach();
+
     this.logger.info(`daemon started at ${this.baseUrl} (home: ${this.store.homeDir})`);
   }
 
   async stop(): Promise<void> {
     const server = this.httpServer;
     if (!server) return;
+    await this.gateway.detach().catch(() => {});
+    server.closeAllConnections(); // 先断残余 keep-alive，否则 close 回调迟迟不触发
     await new Promise<void>((resolve) => server.close(() => resolve()));
     this.httpServer = undefined;
     this.logger.info('daemon stopped');

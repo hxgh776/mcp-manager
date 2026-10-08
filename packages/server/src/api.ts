@@ -225,7 +225,10 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
 
   // —— 网关 ——
   router.get('/api/gateway', async (ctx) => {
-    sendJson(ctx.res, 200, daemon.gatewayStatus());
+    sendJson(ctx.res, 200, {
+      ...daemon.gatewayStatus(),
+      upstreams: daemon.gateway.upstreamSnapshots(),
+    });
   });
 
   router.post('/api/gateway/start', async (ctx) => {

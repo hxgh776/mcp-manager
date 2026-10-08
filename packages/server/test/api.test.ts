@@ -137,13 +137,18 @@ describe('agents + settings (I-AP-02)', () => {
   });
 });
 
-describe('gateway stubs before M1.5', () => {
-  it('网关未加载时 /mcp 与进程控制返回 503', async () => {
-    const mcp = await fetch(`${base}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
-    expect(mcp.status).toBe(503);
-    await api('POST', '/api/servers', { name: 'x', transport: 'stdio', command: 'node' });
-    const ctrl = await api('POST', '/api/servers/x/start');
-    expect(ctrl.status).toBe(503);
+describe('gateway runtime switch', () => {
+  it('/mcp 无 token → 401；网关停止后带 token 也 503', async () => {
+    const noToken = await fetch(`${base}/mcp`, { method: 'POST' });
+    expect(noToken.status).toBe(401);
+    const stopped = await api('POST', '/api/gateway/stop');
+    expect(stopped.status).toBe(200);
+    const down = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(down.status).toBe(503);
+    expect(((await down.json()) as { code?: string }).code).toBe('GATEWAY_DOWN');
   });
 });
 
