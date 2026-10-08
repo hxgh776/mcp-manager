@@ -1,0 +1,23 @@
+{
+  "name": "mcp-manager",
+  "version": "0.1.0",
+  "description": "Local MCP control plane: configure once, enable across coding agents; aggregate & proxy MCP servers.",
+  "type": "module",
+  "bin": {
+    "mcpmgr": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mcp-manager/core": "workspace:*",
+    "@mcp-manager/server": "workspace:*",
+    "commander": "^13.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
