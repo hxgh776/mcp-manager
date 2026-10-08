@@ -24,10 +24,11 @@ export function slugify(name: string): string {
 }
 
 export function uniqueId(config: ManagerConfig, base: string): string {
-  let id = SLUG_RE.test(base) ? base : slugify(base);
+  const slug = SLUG_RE.test(base) ? base : slugify(base);
+  let id = slug;
   let n = 2;
   while (config.servers.some((s) => s.id === id)) {
-    id = `${base}-${n}`;
+    id = `${slug}-${n}`;
     n += 1;
   }
   return id;
