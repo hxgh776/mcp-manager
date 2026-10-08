@@ -93,10 +93,10 @@ export class CodexTomlAdapter implements AgentAdapter {
         if (m.action === 'upsert') projected.set(m.key, m.desired);
         else projected.delete(m.key);
       }
-      return { changes, keyStates: finalizeKeyStates(plan, projected), conflicts };
+      return { changes, keyStates: finalizeKeyStates(plan, projected, options.previous), conflicts };
     }
     if (mutations.length === 0) {
-      return { changes, keyStates: finalizeKeyStates(plan, currentValues), conflicts };
+      return { changes, keyStates: finalizeKeyStates(plan, currentValues, options.previous), conflicts };
     }
 
     if (options.backup) await options.backup();
@@ -148,7 +148,7 @@ export class CodexTomlAdapter implements AgentAdapter {
       : {};
     return {
       changes,
-      keyStates: finalizeKeyStates(plan, new Map(Object.entries(finalServers))),
+      keyStates: finalizeKeyStates(plan, new Map(Object.entries(finalServers)), options.previous),
       conflicts,
     };
   }
@@ -163,7 +163,11 @@ export class CodexTomlAdapter implements AgentAdapter {
     }
   }
 
-  private denormalizeEntry(entry: RawServerEntry): Record<string, unknown> {
+  denormalizeEntry(entry: RawServerEntry): Record<string, unknown> {
+    return this.denormalize(entry);
+  }
+
+  private denormalize(entry: RawServerEntry): Record<string, unknown> {
     // codex 原生仅 stdio；http 由同步引擎在直连分发前过滤，此处兜底转 stdio 不允许
     if (entry.transport !== 'stdio') {
       throw new Error('codex 直连仅支持 stdio 传输（http 类 server 请使用网关模式）');

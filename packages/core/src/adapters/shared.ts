@@ -89,16 +89,39 @@ export function planChanges(params: {
   return { plan, conflicts };
 }
 
-/** 计划完成后（真实或推演），产出最终 keyStates */
+/**
+ * 计划完成后（真实或推演），产出最终 keyStates。
+ *
+ * 关键语义：keyStates.hash 永远代表"本工具最后一次写入（或确认无漂移）的内容 hash"。
+ * - upsert：记录写入后的 hash；
+ * - remove：删除失败/被跳过且存在上次快照 → 保留上次快照（冲突态持续可见）；
+ * - none 且当前值与上次快照不一致（用户手改被跳过）→ 保留上次快照，
+ *   绝不把用户的手改 hash 记为快照，否则冲突会被静默吞掉。
+ */
 export function finalizeKeyStates(
   plan: PlannedChange[],
   currentAfter: Map<string, unknown>,
+  previous: KeyState[],
 ): KeyState[] {
   const states: KeyState[] = [];
   for (const change of plan) {
     const value = currentAfter.get(change.key);
-    if (value !== undefined) {
-      states.push({ key: change.key, hash: stableHash(value) });
+    const prev = previous.find((p) => p.key === change.key);
+    const currentHash = value === undefined ? null : stableHash(value);
+    if (change.action === 'upsert') {
+      if (currentHash !== null) states.push({ key: change.key, hash: currentHash });
+      continue;
+    }
+    if (change.action === 'remove') {
+      if (currentHash !== null && prev) states.push({ key: change.key, hash: prev.hash });
+      continue;
+    }
+    // none
+    if (currentHash === null) continue;
+    if (prev && prev.hash !== currentHash) {
+      states.push({ key: change.key, hash: prev.hash });
+    } else {
+      states.push({ key: change.key, hash: currentHash });
     }
   }
   return states;

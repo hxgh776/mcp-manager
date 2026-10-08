@@ -8,3 +8,5 @@ export * from './adapters/shared.js';
 export { JsonAgentAdapter, normalizeClaudeStyle, normalizeUrlOrCommand, normalizeOpencode, denormalizeClaudeStyle, denormalizeUrlOrCommand, denormalizeOpencode } from './adapters/json-adapter.js';
 export { CodexTomlAdapter, splitTomlSections, stripManagedSections } from './adapters/codex-toml.js';
 export * from './agents.js';
+export * from './registry.js';
+export * from './sync.js';

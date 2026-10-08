@@ -61,4 +61,6 @@ export interface AgentAdapter {
   apply(file: string, writes: FragmentWrite[], options: ApplyOptions): Promise<ApplyResult>;
   /** agent 原生条目 → 归一化；无法识别返回 null */
   normalizeEntry(raw: unknown): RawServerEntry | null;
+  /** 归一化条目 → agent 原生形态（写入方向；不支持的传输应抛错） */
+  denormalizeEntry(entry: RawServerEntry): unknown;
 }

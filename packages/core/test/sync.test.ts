@@ -1,0 +1,231 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { makeAgents } from '../src/agents.js';
+import { Store } from '../src/store.js';
+import { SyncEngine } from '../src/sync.js';
+import {
+  applyImport,
+  detectAgents,
+  importPreview,
+  setBinding,
+  upsertServer,
+} from '../src/registry.js';
+import { GATEWAY_KEY } from '../src/types.js';
+import type { ManagerConfig } from '../src/types.js';
+
+let sandbox: string;
+let agents: ReturnType<typeof makeAgents>;
+let store: Store;
+let engine: SyncEngine;
+let config: ManagerConfig;
+
+beforeEach(async () => {
+  sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'mcpmgr-sync-'));
+  agents = makeAgents(sandbox);
+  store = new Store(sandbox);
+  engine = new SyncEngine({ backupsDir: store.backupsDir, agents });
+  config = await store.load();
+});
+
+afterEach(async () => {
+  await fs.rm(sandbox, { recursive: true, force: true });
+});
+
+function addStdioServer(id: string, name: string): void {
+  upsertServer(config, {
+    id,
+    name,
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', `@modelcontextprotocol/server-${id}`],
+    env: { TOKEN: `secret-${id}` },
+  });
+}
+
+async function writeAgentFile(relSegments: string[], content: string): Promise<void> {
+  const file = path.join(sandbox, ...relSegments);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, content, 'utf8');
+}
+
+describe('detect + import (U-IM / C1 C5)', () => {
+  it('探测：只认存在配置文件的 agent', async () => {
+    await fs.mkdir(path.join(sandbox, '.cursor'), { recursive: true });
+    await fs.writeFile(
+      path.join(sandbox, '.cursor', 'mcp.json'),
+      JSON.stringify({ mcpServers: { ctx: { command: 'node', args: ['ctx.js'] } } }),
+      'utf8',
+    );
+    const detections = await detectAgents(agents);
+    const byType = new Map(detections.map((d) => [d.agentType, d]));
+    expect(byType.get('cursor')!.detected).toBe(true);
+    expect(byType.get('claude-code')!.detected).toBe(false);
+  });
+
+  it('导入：跨 agent 指纹去重，applyImport 跳过注册表已有项', async () => {
+    await fs.mkdir(path.join(sandbox, '.cursor'), { recursive: true });
+    await fs.mkdir(path.join(sandbox, '.claude'), { recursive: true });
+    await fs.writeFile(
+      path.join(sandbox, '.cursor', 'mcp.json'),
+      JSON.stringify({ mcpServers: { fs: { command: 'npx', args: ['-y', 'srv-fs'] } } }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(sandbox, '.claude.json'),
+      JSON.stringify({ mcpServers: { fs2: { command: 'npx', args: ['-y', 'srv-fs'] }, gh: { command: 'node', args: ['gh.js'] } } }),
+      'utf8',
+    );
+    const groups = await importPreview(agents);
+    expect(groups).toHaveLength(2); // srv-fs 两个 agent 同指纹 → 1 组；gh 1 组
+    const fsGroup = groups.find((g) => g.fingerprint.includes('srv-fs'))!;
+    expect(fsGroup.candidates).toHaveLength(2);
+
+    const added = applyImport(config, groups);
+    expect(added).toHaveLength(2);
+    // 分组的 id 取首个候选（AGENT_LIST 顺序 claude-code 在前 → fs2）
+    expect(config.servers.map((s) => s.id).sort()).toEqual(['fs2', 'gh']);
+
+    // 再导一次：指纹重复 → 0 新增
+    const groups2 = await importPreview(agents);
+    expect(applyImport(config, groups2)).toHaveLength(0);
+  });
+});
+
+describe('sync engine (I-SY)', () => {
+  it('I-SY-01 绑定矩阵 → 三个 agent 配置落盘，无关内容保真', async () => {
+    // 预置用户已有内容
+    await writeAgentFile(['.claude.json'], JSON.stringify({ theme: 'dark', mcpServers: { user1: { command: 'x' } } }));
+    await writeAgentFile(['.codex', 'config.toml'], '# my config\nmodel = "x"\n');
+    await writeAgentFile(['.cursor', 'mcp.json'], JSON.stringify({ mcpServers: {} }));
+
+    addStdioServer('filesystem', 'Filesystem');
+    setBinding(config, 'filesystem', 'claude-code');
+    setBinding(config, 'filesystem', 'codex');
+    setBinding(config, 'filesystem', 'cursor');
+
+    const report = await engine.sync(config);
+    await store.save(config);
+
+    const claude = JSON.parse(await fs.readFile(path.join(sandbox, '.claude.json'), 'utf8'));
+    expect(claude.theme).toBe('dark');
+    expect(claude.mcpServers['user1']).toEqual({ command: 'x' });
+    expect(claude.mcpServers['filesystem'].command).toBe('npx');
+    expect(claude.mcpServers['filesystem'].env.TOKEN).toBe('secret-filesystem');
+
+    const codexText = await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8');
+    expect(codexText).toContain('# my config');
+    expect(codexText).toContain('[mcp_servers.filesystem]');
+
+    const cursor = JSON.parse(await fs.readFile(path.join(sandbox, '.cursor', 'mcp.json'), 'utf8'));
+    expect(cursor.mcpServers['filesystem'].command).toBe('npx');
+
+    // 报告：三个绑定的 agent 各一个 upsert
+    const boundAgents = ['claude-code', 'codex', 'cursor'];
+    for (const agent of report.perAgent.filter((r) => boundAgents.includes(r.agentType))) {
+      expect(agent.changes).toContainEqual({
+        key: 'filesystem',
+        action: 'upsert',
+        serverId: 'filesystem',
+      });
+    }
+
+    // 幂等：再同步全部 no-change
+    const report2 = await engine.sync(config);
+    for (const agent of report2.perAgent) {
+      expect(agent.changes.every((c) => c.action === 'none')).toBe(true);
+    }
+  });
+
+  it('I-SY-02 解绑 → 收敛移除片段', async () => {
+    addStdioServer('filesystem', 'Filesystem');
+    setBinding(config, 'filesystem', 'cursor');
+    await engine.sync(config);
+    await store.save(config);
+    expect(
+      JSON.parse(await fs.readFile(path.join(sandbox, '.cursor', 'mcp.json'), 'utf8')).mcpServers[
+        'filesystem'
+      ],
+    ).toBeDefined();
+
+    config.bindings = config.bindings.filter((b) => !(b.serverId === 'filesystem' && b.agentType === 'cursor'));
+    const report = await engine.sync(config);
+    await store.save(config);
+    const cursorReport = report.perAgent.find((r) => r.agentType === 'cursor')!;
+    expect(cursorReport.changes).toContainEqual({ key: 'filesystem', action: 'remove', serverId: undefined });
+    const doc = JSON.parse(await fs.readFile(path.join(sandbox, '.cursor', 'mcp.json'), 'utf8'));
+    expect(doc.mcpServers['filesystem']).toBeUndefined();
+  });
+
+  it('I-SY-03 网关模式：写公共 GATEWAY_KEY（URL+Bearer），无直连条目；codex 报不支持', async () => {
+    await writeAgentFile(['.codex', 'config.toml'], '# my config\n');
+    addStdioServer('notion', 'Notion');
+    config.servers[0]!.gatewayMode = true;
+    setBinding(config, 'notion', 'claude-code');
+    setBinding(config, 'notion', 'codex');
+
+    const report = await engine.sync(config);
+    await store.save(config);
+
+    const claude = JSON.parse(await fs.readFile(path.join(sandbox, '.claude.json'), 'utf8'));
+    expect(claude.mcpServers['notion']).toBeUndefined();
+    expect(claude.mcpServers[GATEWAY_KEY]).toEqual({
+      type: 'http',
+      url: `http://127.0.0.1:${config.settings.port}/mcp`,
+      headers: { Authorization: `Bearer ${config.settings.token}` },
+    });
+
+    const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
+    expect(codexReport.unsupported[0]?.reason).toContain('反向桥');
+    expect(await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8')).not.toContain('mcp-manager-gateway');
+  });
+
+  it('I-SY-04 直连不支持传输 → unsupported 且不写', async () => {
+    await writeAgentFile(['.codex', 'config.toml'], '# my config\n');
+    upsertServer(config, { id: 'web-api', name: 'Web API', transport: 'http', url: 'https://api.example.com/mcp' });
+    setBinding(config, 'web-api', 'codex');
+    const report = await engine.sync(config);
+    const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
+    expect(codexReport.unsupported).toHaveLength(1);
+    expect(await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8')).not.toContain('web-api');
+  });
+
+  it('I-SY-05 手改片段 → 冲突报告；override 后覆盖', async () => {
+    await writeAgentFile(['.cursor', 'mcp.json'], JSON.stringify({ mcpServers: {} }));
+    addStdioServer('filesystem', 'Filesystem');
+    setBinding(config, 'filesystem', 'cursor');
+    await engine.sync(config);
+    await store.save(config);
+
+    // 用户手改
+    const doc = JSON.parse(await fs.readFile(path.join(sandbox, '.cursor', 'mcp.json'), 'utf8'));
+    doc.mcpServers['filesystem'].args = ['-y', 'hacked'];
+    await fs.writeFile(path.join(sandbox, '.cursor', 'mcp.json'), JSON.stringify(doc), 'utf8');
+
+    const conflict = await engine.sync(config);
+    const cr = conflict.perAgent.find((r) => r.agentType === 'cursor')!;
+    expect(cr.conflicts).toHaveLength(1);
+    expect(cr.conflicts[0]!.resolutionKey).toBe('cursor:filesystem');
+
+    // override
+    const overrideReport = await engine.sync(config, {
+      resolutions: { 'cursor:filesystem': 'override' },
+    });
+    const or = overrideReport.perAgent.find((r) => r.agentType === 'cursor')!;
+    expect(or.conflicts[0]!.resolution).toBe('override');
+    const after = JSON.parse(await fs.readFile(path.join(sandbox, '.cursor', 'mcp.json'), 'utf8'));
+    expect(after.mcpServers['filesystem'].args).toEqual(['-y', '@modelcontextprotocol/server-filesystem']);
+  });
+
+  it('I-SY-06 备份：真实变更在 backups 目录留下按 agent 分组的副本', async () => {
+    await writeAgentFile(['.claude.json'], JSON.stringify({ mcpServers: {} }));
+    addStdioServer('filesystem', 'Filesystem');
+    setBinding(config, 'filesystem', 'claude-code');
+    await engine.sync(config);
+    const backupDir = path.join(store.backupsDir, 'claude-code');
+    const files = await fs.readdir(backupDir);
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/claude\.json$/);
+  });
+});

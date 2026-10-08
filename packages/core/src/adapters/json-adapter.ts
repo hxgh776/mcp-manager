@@ -55,6 +55,10 @@ export class JsonAgentAdapter implements AgentAdapter {
     return this.normalizeFn(raw);
   }
 
+  denormalizeEntry(entry: RawServerEntry): Record<string, unknown> {
+    return this.denormalizeFn(entry);
+  }
+
   async read(file: string): Promise<Map<string, RawServerEntry>> {
     const text = await readTextIfExists(file);
     if (text === null) return new Map();
@@ -103,11 +107,11 @@ export class JsonAgentAdapter implements AgentAdapter {
         if (m.action === 'upsert') projected.set(m.key, m.desired);
         else projected.delete(m.key);
       }
-      return { changes, keyStates: finalizeKeyStates(plan, projected), conflicts };
+      return { changes, keyStates: finalizeKeyStates(plan, projected, options.previous), conflicts };
     }
 
     if (mutations.length === 0) {
-      return { changes, keyStates: finalizeKeyStates(plan, currentValues), conflicts };
+      return { changes, keyStates: finalizeKeyStates(plan, currentValues, options.previous), conflicts };
     }
 
     if (options.backup) await options.backup();
@@ -152,7 +156,8 @@ export class JsonAgentAdapter implements AgentAdapter {
       changes,
       keyStates: finalizeKeyStates(
         plan,
-        new Map(Object.entries(record[this.containerKey] as Record<string, unknown>)),
+        new Map(Object.entries((record[this.containerKey] as Record<string, unknown>) ?? {})),
+        options.previous,
       ),
       conflicts,
     };
