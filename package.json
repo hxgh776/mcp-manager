@@ -10,7 +10,7 @@
     "build": "pnpm -r run build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint packages e2e",
+    "lint": "eslint packages",
     "typecheck": "tsc -p tsconfig.check.json"
   },
   "devDependencies": {

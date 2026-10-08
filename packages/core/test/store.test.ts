@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { backupFile } from '../src/backup.js';
 import { atomicWriteFile, stableHash, stableStringify } from '../src/fsutil.js';
-import { defaultConfig, resolveHomeDir, Store } from '../src/store.js';
+import { resolveHomeDir, Store } from '../src/store.js';
 
 let sandbox: string;
 
