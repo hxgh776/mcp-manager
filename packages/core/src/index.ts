@@ -3,3 +3,8 @@ export * from './errors.js';
 export * from './fsutil.js';
 export * from './backup.js';
 export * from './store.js';
+export * from './adapters/types.js';
+export * from './adapters/shared.js';
+export { JsonAgentAdapter, normalizeClaudeStyle, normalizeUrlOrCommand, normalizeOpencode, denormalizeClaudeStyle, denormalizeUrlOrCommand, denormalizeOpencode } from './adapters/json-adapter.js';
+export { CodexTomlAdapter, splitTomlSections, stripManagedSections } from './adapters/codex-toml.js';
+export * from './agents.js';
