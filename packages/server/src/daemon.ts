@@ -253,6 +253,6 @@ function actualPortOf(server: http.Server): number {
 }
 
 function resolveDefaultWebDist(): string | null {
-  // <server>/dist/daemon.js → <server>/../web/dist
-  return path.resolve(import.meta.dirname, '..', 'web', 'dist');
+  // 运行时位于 <repo>/packages/server/dist/daemon.js → <repo>/packages/web/dist
+  return path.resolve(import.meta.dirname, '..', '..', 'web', 'dist');
 }
