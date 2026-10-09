@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../api';
+import { api, setToken } from '../api';
 import type { AgentInfo, GatewayInfo, StatusInfo } from '../api';
 import { Badge, Btn, Card, ErrorBanner, OkBanner } from '../ui';
 
@@ -46,6 +46,24 @@ export function GatewayPage() {
     onError: (e) => setError(String((e as Error).message)),
   });
 
+  const authRequired = status.data?.authRequired === true;
+  const toggleAuth = useMutation({
+    mutationFn: (on: boolean) => api.patch('/api/settings', { authRequired: on }),
+    onSuccess: async (_res, on) => {
+      if (on) {
+        // 把当前 token 写入本浏览器，避免开启后自锁在令牌门外
+        try {
+          const t = await api.get<{ token: string }>('/api/settings/token');
+          setToken(t.token);
+        } catch { /* 忽略 */ }
+      }
+      void qc.invalidateQueries();
+      setOk(on ? '访问令牌已启用——请到「分发」页重新同步（分发内容将携带凭证）' : '访问令牌已关闭——请到「分发」页重新同步（去除凭证）');
+      setError(null);
+    },
+    onError: (e) => setError(String((e as Error).message)),
+  });
+
   const restart = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'start' | 'stop' | 'restart' }) =>
       api.post(`/api/servers/${id}/${action}`),
@@ -63,11 +81,11 @@ export function GatewayPage() {
 
       {status.data?.resyncPending === true && (
         <div data-testid="resync-banner" className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          ⚠ token 已轮换，已分发的网关配置仍在用旧 token——请到
+          ⚠ token 已轮换或访问令牌开关已变更，已分发的网关配置需要重新同步——请到
           <button className="mx-1 underline" onClick={() => switchToSync()}>
             「分发」页
           </button>
-          重新同步后此提醒才会消除。
+          操作，此提醒才会消除。
         </div>
       )}
 
@@ -188,17 +206,37 @@ export function GatewayPage() {
       <Card
         title="访问令牌"
         actions={
-          <Btn small kind="danger" onClick={() => rotate.mutate()}>
-            轮换 token
-          </Btn>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              data-testid="auth-toggle"
+              type="checkbox"
+              checked={authRequired}
+              onChange={(e) => toggleAuth.mutate(e.target.checked)}
+            />
+            <span>{authRequired ? '已启用' : '未启用'}</span>
+          </label>
         }
       >
-        <code data-testid="token-value" className="break-all rounded bg-slate-100 px-2 py-1 text-xs">
-          {token.data?.token}
-        </code>
-        <p className="mt-2 text-xs text-slate-400">
-          轮换后所有已分发的网关配置都会失效，需要到「分发」页重新同步。
-        </p>
+        {authRequired ? (
+          <>
+            <code data-testid="token-value" className="break-all rounded bg-slate-100 px-2 py-1 text-xs">
+              {token.data?.token}
+            </code>
+            <div className="mt-2 flex items-center gap-2">
+              <Btn small kind="danger" onClick={() => rotate.mutate()}>
+                轮换 token
+              </Btn>
+              <span className="text-xs text-slate-400">
+                轮换后所有已分发的网关配置都会失效，需要到「分发」页重新同步。
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-slate-500">
+            访问令牌未启用（默认）：网关与 API 仅监听 127.0.0.1，本机进程即可访问。
+            若本机环境不受信任，建议开启；开启后到「分发」页重新同步，分发内容会携带凭证。
+          </p>
+        )}
       </Card>
     </div>
   );

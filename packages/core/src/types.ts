@@ -67,6 +67,8 @@ export interface Settings {
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** M2.4：token 轮换时间（ISO）。已分发的网关配置需要重新同步；网关条目重写后清除。 */
   tokenRotatedAt?: string;
+  /** D7：访问令牌开关。默认 false（仅环回监听兜底）；开启后 /api 与网关要求 Bearer token。 */
+  authRequired?: boolean;
 }
 
 export interface ManagerConfig {

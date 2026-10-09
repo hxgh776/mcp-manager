@@ -18,7 +18,7 @@ pnpm install
 pnpm build          # 构建 core / server / cli / web
 
 node packages/cli/dist/index.js start    # 或全局安装后: mcpmgr start
-# API/UI: http://127.0.0.1:6280   （token 见 ~/.mcp-manager/config.json）
+# API/UI: http://127.0.0.1:6280   （默认无需令牌；可在网关页开启访问令牌）
 ```
 
 打开 `http://127.0.0.1:6280` 输入 token 即可使用 Web UI。
@@ -54,7 +54,7 @@ cd e2e && pnpm i && npx playwright install chromium && pnpm test   # E2E 冒烟
 ├─ node:http 路由
 │  ├─ /mcp                → 聚合端点（MCP SDK streamable HTTP, stateless）
 │  ├─ /servers/:id/mcp    → per-server 端点
-│  ├─ /api/*              → 管理 REST（Bearer token，仅 127.0.0.1）
+│  ├─ /api/*              → 管理 REST（令牌默认关闭，可开启；仅 127.0.0.1）
 │  └─ /*                  → Web UI 静态托管（React SPA）
 ├─ Gateway（UpstreamManager：懒启动/退避重启/stdio 串行化）
 └─ Core：Store（原子写/备份/hash）· 适配器（JSON/TOML 保真写入）· SyncEngine · 冲突检测

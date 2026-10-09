@@ -88,7 +88,13 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
       serverCount: daemon.config.servers.length,
       bindingCount: daemon.config.bindings.length,
       resyncPending: daemon.config.settings.tokenRotatedAt !== undefined,
+      authRequired: daemon.config.settings.authRequired === true,
     });
+  });
+
+  // D7：公开探测端点（免鉴权，由 daemon.handle 放行）——UI 用它决定是否显示令牌门
+  router.get('/api/auth/info', async (ctx) => {
+    sendJson(ctx.res, 200, { authRequired: daemon.config.settings.authRequired === true });
   });
 
   // M2.2：本机 server 运行时探测
@@ -262,6 +268,7 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
     sendJson(ctx.res, 200, {
       port: daemon.config.settings.port,
       logLevel: daemon.config.settings.logLevel,
+      authRequired: daemon.config.settings.authRequired === true,
     });
   });
 
@@ -270,7 +277,7 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
   });
 
   router.patch('/api/settings', async (ctx) => {
-    const body = (await ctx.body()) as { port?: number; logLevel?: string };
+    const body = (await ctx.body()) as { port?: number; logLevel?: string; authRequired?: boolean };
     if (body.port !== undefined) {
       if (!Number.isInteger(body.port) || body.port < 1 || body.port > 65535) {
         return sendError(ctx.res, 400, '端口非法');
@@ -284,18 +291,28 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
       daemon.config.settings.logLevel = body.logLevel as 'debug' | 'info' | 'warn' | 'error';
       daemon.logger.setLevel(daemon.config.settings.logLevel);
     }
+    if (body.authRequired !== undefined) {
+      daemon.config.settings.authRequired = body.authRequired;
+      // D7：开关切换后，已分发的网关配置形态（是否带凭证）与注册表不一致——提示重新同步
+      if (daemon.config.bindings.length > 0) {
+        daemon.config.settings.tokenRotatedAt = new Date().toISOString();
+      }
+    }
     await save();
     sendJson(ctx.res, 200, { ok: true });
   });
 
   router.post('/api/settings/token/rotate', async (ctx) => {
     daemon.config.settings.token = randomBytes(24).toString('hex');
-    // M2.4：标记待重同步；sync 重写网关条目后由 SyncEngine 清除
-    daemon.config.settings.tokenRotatedAt = new Date().toISOString();
+    // M2.4：仅在令牌启用时标记待重同步（关闭时网关条目不含 token，轮换无分发影响）
+    const authOn = daemon.config.settings.authRequired === true;
+    if (authOn && daemon.config.bindings.length > 0) {
+      daemon.config.settings.tokenRotatedAt = new Date().toISOString();
+    }
     await save();
     sendJson(ctx.res, 200, {
       token: daemon.config.settings.token,
-      resyncRequired: daemon.config.bindings.length > 0,
+      resyncRequired: authOn && daemon.config.bindings.length > 0,
     });
   });
 

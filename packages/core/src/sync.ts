@@ -121,6 +121,8 @@ export class SyncEngine {
     const hadGatewayKey = previous.some((k) => k.key === GATEWAY_KEY);
     // M3.3 G13：per-agent 分组端点——该 agent 只看到自己绑定的网关 server
     const agentGatewayUrl = `http://127.0.0.1:${config.settings.port}/agents/${agentType}/mcp`;
+    // D7：仅在令牌开启时分发凭证
+    const withAuth = config.settings.authRequired === true;
     if (gatewayServers.length > 0) {
       if (adapter.transports.includes('http')) {
         writes.push({
@@ -128,7 +130,7 @@ export class SyncEngine {
           entry: {
             transport: 'http',
             url: agentGatewayUrl,
-            headers: { Authorization: `Bearer ${config.settings.token}` },
+            ...(withAuth ? { headers: { Authorization: `Bearer ${config.settings.token}` } } : {}),
           },
         });
         keyToServer.set(GATEWAY_KEY, undefined);
@@ -136,7 +138,12 @@ export class SyncEngine {
         // G7：Codex 等经 stdio 桥接入分组网关端点
         writes.push({
           key: GATEWAY_KEY,
-          entry: this.bridgeEntry(GATEWAY_KEY, agentGatewayUrl, undefined, config.settings.token),
+          entry: this.bridgeEntry(
+            GATEWAY_KEY,
+            agentGatewayUrl,
+            undefined,
+            withAuth ? config.settings.token : undefined,
+          ),
         });
         keyToServer.set(GATEWAY_KEY, undefined);
       } else {

@@ -54,6 +54,7 @@ export interface StatusInfo {
   serverCount: number;
   bindingCount: number;
   resyncPending: boolean;
+  authRequired: boolean;
 }
 
 export interface RuntimeTool {

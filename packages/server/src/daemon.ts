@@ -186,9 +186,11 @@ export class Daemon {
         return;
       }
 
-      // 2) 管理 API（G9 鉴权）
+      // 2) 管理 API（D7：authRequired 开启时校验 Bearer token；/api/auth/info 永远公开）
       if (pathname === '/api' || pathname.startsWith('/api/')) {
-        if (!checkToken(req, this.config.settings.token, url.searchParams)) {
+        const isPublic = pathname === '/api/auth/info';
+        if (!isPublic && this.config.settings.authRequired === true &&
+            !checkToken(req, this.config.settings.token, url.searchParams)) {
           sendError(res, 401, '未授权', 'UNAUTHORIZED');
           return;
         }

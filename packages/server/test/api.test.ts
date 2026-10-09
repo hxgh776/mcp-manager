@@ -42,14 +42,28 @@ afterEach(async () => {
   await fs.rm(sandbox, { recursive: true, force: true });
 });
 
-describe('auth (I-GW-07 部分)', () => {
-  it('无 token / 错 token → 401；query token 放行', async () => {
+describe('auth (D7 令牌开关)', () => {
+  it('默认关闭：无 token 直接 200', async () => {
+    const noAuth = await fetch(`${base}/api/status`);
+    expect(noAuth.status).toBe(200);
+    const info = (await (await fetch(`${base}/api/auth/info`)).json()) as { authRequired: boolean };
+    expect(info.authRequired).toBe(false);
+  });
+
+  it('开启后：无/错 token 401，query token 放行；关闭恢复', async () => {
+    await api('PATCH', '/api/settings', { authRequired: true });
     const noAuth = await fetch(`${base}/api/status`);
     expect(noAuth.status).toBe(401);
     const wrong = await api('GET', '/api/status', undefined, 'wrong-token');
     expect(wrong.status).toBe(401);
     const viaQuery = await fetch(`${base}/api/status?token=${token}`);
     expect(viaQuery.status).toBe(200);
+    // auth/info 仍然公开
+    const info = await fetch(`${base}/api/auth/info`);
+    expect(info.status).toBe(200);
+    // 关闭恢复
+    await api('PATCH', '/api/settings', { authRequired: false });
+    expect((await fetch(`${base}/api/status`)).status).toBe(200);
   });
 });
 
@@ -132,6 +146,8 @@ describe('agents + settings (I-AP-02)', () => {
     const badPort = await api('PATCH', '/api/settings', { port: 99999 });
     expect(badPort.status).toBe(400);
 
+    // 轮换在令牌开启时才有"待重同步"语义
+    await api('PATCH', '/api/settings', { authRequired: true });
     const rotate = await api('POST', '/api/settings/token/rotate');
     const newToken = (rotate.data as { token: string }).token;
     expect(newToken).not.toBe(token);
@@ -143,7 +159,8 @@ describe('agents + settings (I-AP-02)', () => {
 });
 
 describe('gateway runtime switch', () => {
-  it('/mcp 无 token → 401；网关停止后带 token 也 503', async () => {
+  it('/mcp 令牌开启时无 token → 401；网关停止后带 token 也 503', async () => {
+    await api('PATCH', '/api/settings', { authRequired: true });
     const noToken = await fetch(`${base}/mcp`, { method: 'POST' });
     expect(noToken.status).toBe(401);
     const stopped = await api('POST', '/api/gateway/stop');
@@ -154,6 +171,7 @@ describe('gateway runtime switch', () => {
     });
     expect(down.status).toBe(503);
     expect(((await down.json()) as { code?: string }).code).toBe('GATEWAY_DOWN');
+    await api('PATCH', '/api/settings', { authRequired: false });
   });
 });
 
@@ -168,6 +186,8 @@ describe('M2 additions', () => {
   });
 
   it('M2.4 token 轮换提醒：rotate 后 resyncPending，网关重写后清除', async () => {
+    // 令牌开启时轮换才有重同步语义（D7：关闭时网关条目不含 token）
+    await api('PATCH', '/api/settings', { authRequired: true });
     // 注册一个网关模式 server 并绑定（产生网关条目）
     await api('POST', '/api/servers', {
       name: 'gw-srv', transport: 'stdio', command: 'node', args: ['x.js'], gatewayMode: true,
@@ -183,6 +203,7 @@ describe('M2 additions', () => {
     // 重新同步：网关条目带新 token 重写 → 提醒消除
     await api('POST', '/api/sync', {});
     expect(((await api('GET', '/api/status')).data as { resyncPending: boolean }).resyncPending).toBe(false);
+    await api('PATCH', '/api/settings', { authRequired: false });
   });
 });
 

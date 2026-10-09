@@ -288,9 +288,20 @@ describe('gateway aggregate endpoint (I-GW)', () => {
     await client.close();
   });
 
-  it('I-GW-07 /mcp 鉴权：无 token 401 (G9)', async () => {
+  it('D7 令牌开关：默认关闭时无凭证可访问；开启后无 token 401', async () => {
+    // 默认关闭：无 token 客户端可用
+    const openTransport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`));
+    const openClient = new Client({ name: 'no-auth-client', version: '1.0.0' });
+    await openClient.connect(openTransport);
+    const tools = await openClient.listTools();
+    expect(tools.tools.length).toBeGreaterThan(0);
+    await openClient.close();
+
+    // 开启后：无 token 401
+    await api('PATCH', '/api/settings', { authRequired: true });
     const res = await fetch(`${base}/mcp`, { method: 'POST' });
     expect(res.status).toBe(401);
+    await api('PATCH', '/api/settings', { authRequired: false });
   });
 
   it('I-GW-08 调用日志记录 server/tool/耗时 (G11)', async () => {

@@ -45,6 +45,7 @@ const configSchema = z.object({
     token: z.string().min(8),
     logLevel: z.enum(['debug', 'info', 'warn', 'error']),
     tokenRotatedAt: z.string().optional(),
+    authRequired: z.boolean().optional(),
   }),
 });
 
@@ -58,6 +59,7 @@ export function defaultConfig(): ManagerConfig {
       port: 6280,
       token: randomBytes(24).toString('hex'),
       logLevel: 'info',
+      authRequired: false, // D7：默认不启用令牌，仅环回监听兜底
     },
   };
 }

@@ -30,15 +30,25 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>(initialTab);
   const queryClient = useQueryClient();
 
+  // D7：先探测令牌开关——默认关闭时直接进入，不显示令牌门
+  const authInfo = useQuery({
+    queryKey: ['auth-info'],
+    queryFn: () => api.get<{ authRequired: boolean }>('/api/auth/info'),
+    retry: false,
+    staleTime: Infinity,
+  });
+  const authRequired = authInfo.data?.authRequired === true;
+
   const status = useQuery({
     queryKey: ['status'],
     queryFn: () => api.get<StatusInfo>('/api/status'),
     retry: false,
-    enabled: authed,
+    enabled: authed || !authRequired,
     refetchInterval: 10_000,
   });
 
   const unauthorized = status.error instanceof ApiError && status.error.status === 401;
+  const needsGate = authRequired && (!authed || unauthorized);
 
   const switchTab = (key: TabKey): void => {
     setTab(key);
@@ -47,7 +57,10 @@ export default function App() {
     window.history.replaceState(null, '', url);
   };
 
-  if (!authed || unauthorized) {
+  if (authInfo.isLoading) {
+    return <div className="p-10 text-slate-500">连接 daemon…</div>;
+  }
+  if (needsGate) {
     return (
       <TokenGate
         onOk={() => {

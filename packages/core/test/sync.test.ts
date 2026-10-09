@@ -191,19 +191,30 @@ describe('sync engine (I-SY)', () => {
 
     const claude = JSON.parse(await fs.readFile(path.join(sandbox, '.claude.json'), 'utf8'));
     expect(claude.mcpServers['notion']).toBeUndefined();
+    // D7 默认关闭令牌 → 网关条目不带凭证
     expect(claude.mcpServers[GATEWAY_KEY]).toEqual({
       type: 'http',
       url: `http://127.0.0.1:${config.settings.port}/agents/claude-code/mcp`,
-      headers: { Authorization: `Bearer ${config.settings.token}` },
     });
 
     const codexText = await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8');
     expect(codexText).toContain('[mcp_servers.mcp-manager-gateway]');
     expect(codexText).toContain('bridge-main.js');
     expect(codexText).toContain(`http://127.0.0.1:${config.settings.port}/agents/codex/mcp`);
-    expect(codexText).toContain(`--token=${config.settings.token}`);
+    expect(codexText).not.toContain('--token=');
     const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
     expect(codexReport.unsupported).toHaveLength(0);
+
+    // 开启令牌 → 重写后带凭证（claude 带 Authorization；codex 桥带 --token）
+    config.settings.authRequired = true;
+    await engine.sync(config);
+    const claude2 = JSON.parse(await fs.readFile(path.join(sandbox, '.claude.json'), 'utf8'));
+    expect(claude2.mcpServers[GATEWAY_KEY].headers).toEqual({
+      Authorization: `Bearer ${config.settings.token}`,
+    });
+    expect(await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8')).toContain(
+      `--token=${config.settings.token}`,
+    );
   });
 
   it('I-SY-04 直连 http server 在 Codex 上经反向桥分发', async () => {

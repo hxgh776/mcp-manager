@@ -192,8 +192,9 @@ export class Gateway {
         sendError(res, 503, 'gateway 未启动', 'GATEWAY_DOWN');
         return true;
       }
-      // G9：本机 token 鉴权
-      if (!checkToken(req, this.daemon.config.settings.token, query)) {
+      // D7：仅当访问令牌开启时校验；关闭时依赖环回监听兜底
+      if (this.daemon.config.settings.authRequired === true &&
+          !checkToken(req, this.daemon.config.settings.token, query)) {
         sendError(res, 401, '未授权', 'UNAUTHORIZED');
         return true;
       }
