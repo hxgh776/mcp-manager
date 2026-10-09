@@ -53,6 +53,14 @@ export interface StatusInfo {
   gateway: { running: boolean; port?: number };
   serverCount: number;
   bindingCount: number;
+  resyncPending: boolean;
+}
+
+export interface RuntimeTool {
+  name: string;
+  role: string;
+  found: boolean;
+  version?: string;
 }
 
 export interface AgentInfo {
@@ -68,7 +76,7 @@ export interface AgentInfo {
 export interface ServerDefDTO {
   id: string;
   name: string;
-  transport: 'stdio' | 'http';
+  transport: 'stdio' | 'http' | 'sse';
   command?: string;
   args?: string[];
   env?: Record<string, string>;

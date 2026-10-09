@@ -29,7 +29,7 @@ export function makeAgents(baseDir?: string): Record<AgentType, AgentDefinition>
   const claudeCode = new JsonAgentAdapter({
     type: 'claude-code',
     displayName: 'Claude Code',
-    transports: ['stdio', 'http'],
+    transports: ['stdio', 'http', 'sse'],
     paths: [p('.claude.json')],
     containerKey: 'mcpServers',
     normalize: normalizeClaudeStyle,

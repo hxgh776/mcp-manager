@@ -157,6 +157,35 @@ describe('gateway runtime switch', () => {
   });
 });
 
+describe('M2 additions', () => {
+  it('M2.2 环境探测：node 必在且 found', async () => {
+    const env = await api('GET', '/api/environment');
+    expect(env.status).toBe(200);
+    const tools = env.data.tools as Array<{ name: string; found: boolean; role: string }>;
+    const node = tools.find((t) => t.name === 'node')!;
+    expect(node.found).toBe(true);
+    expect(tools.map((t) => t.name)).toContain('uvx');
+  });
+
+  it('M2.4 token 轮换提醒：rotate 后 resyncPending，网关重写后清除', async () => {
+    // 注册一个网关模式 server 并绑定（产生网关条目）
+    await api('POST', '/api/servers', {
+      name: 'gw-srv', transport: 'stdio', command: 'node', args: ['x.js'], gatewayMode: true,
+    });
+    await api('PUT', '/api/bindings/cursor/gw-srv');
+    await api('POST', '/api/sync', {});
+    expect(((await api('GET', '/api/status')).data as { resyncPending: boolean }).resyncPending).toBe(false);
+
+    const rotated = await api('POST', '/api/settings/token/rotate');
+    token = (rotated.data as { token: string }).token; // 后续请求必须用新 token（旧 token 已 401）
+    expect(((await api('GET', '/api/status')).data as { resyncPending: boolean }).resyncPending).toBe(true);
+
+    // 重新同步：网关条目带新 token 重写 → 提醒消除
+    await api('POST', '/api/sync', {});
+    expect(((await api('GET', '/api/status')).data as { resyncPending: boolean }).resyncPending).toBe(false);
+  });
+});
+
 describe('store round-trip through daemon', () => {
   it('配置变更被持久化，可被下一个 Store 实例读到', async () => {
     await api('POST', '/api/servers', { name: 'persist', transport: 'stdio', command: 'node' });

@@ -3,7 +3,7 @@
 export const AGENT_TYPES = ['claude-code', 'codex', 'cursor', 'trae', 'opencode'] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
-export type TransportType = 'stdio' | 'http';
+export type TransportType = 'stdio' | 'http' | 'sse';
 
 /** MCP Server 定义——注册表中的单一事实来源。 */
 export interface ServerDef {
@@ -54,6 +54,8 @@ export interface Settings {
   port: number;
   token: string;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  /** M2.4：token 轮换时间（ISO）。已分发的网关配置需要重新同步；网关条目重写后清除。 */
+  tokenRotatedAt?: string;
 }
 
 export interface ManagerConfig {

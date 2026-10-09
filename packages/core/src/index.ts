@@ -10,3 +10,4 @@ export { CodexTomlAdapter, splitTomlSections, stripManagedSections } from './ada
 export * from './agents.js';
 export * from './registry.js';
 export * from './sync.js';
+export * from './environment.js';

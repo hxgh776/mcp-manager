@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import type { ServerDefDTO, ToolInfo } from '../api';
+import type { RuntimeTool, ServerDefDTO, ToolInfo } from '../api';
 import { Badge, Btn, Card, ErrorBanner, Field, OkBanner, inputCls } from '../ui';
 
 interface FormState {
   id?: string;
   name: string;
-  transport: 'stdio' | 'http';
+  transport: 'stdio' | 'http' | 'sse';
   command: string;
   args: string;
   env: string;
@@ -25,6 +25,14 @@ const EMPTY: FormState = {
   url: '',
   gatewayMode: false,
   enabled: true,
+};
+
+/** stdio 命令首词 → 依赖的运行时（缺环境时给警告） */
+const COMMAND_RUNTIME: Record<string, string> = {
+  node: 'node',
+  npx: 'npx',
+  uvx: 'uvx',
+  docker: 'docker',
 };
 
 function toForm(s: ServerDefDTO): FormState {
@@ -54,6 +62,21 @@ export function ServersPage() {
     queryKey: ['servers'],
     queryFn: () => api.get<{ servers: ServerDefDTO[] }>('/api/servers'),
   });
+  const environment = useQuery({
+    queryKey: ['environment'],
+    queryFn: () => api.get<{ tools: RuntimeTool[] }>('/api/environment'),
+  });
+  const missingRuntimes = new Set(
+    (environment.data?.tools ?? []).filter((t) => !t.found).map((t) => t.name),
+  );
+
+  const runtimeWarning = (s: ServerDefDTO): string | null => {
+    if (s.transport !== 'stdio' || s.command === undefined) return null;
+    const base = s.command.split(/[\\/]/).at(-1)?.toLowerCase() ?? s.command;
+    const need = COMMAND_RUNTIME[base];
+    if (need !== undefined && missingRuntimes.has(need)) return `缺少运行时 ${need}`;
+    return null;
+  };
 
   const save = useMutation({
     mutationFn: (f: FormState) => {
@@ -132,7 +155,14 @@ export function ServersPage() {
             {(servers.data?.servers ?? []).map((s) => (
               <tr key={s.id} data-testid={`server-row-${s.id}`} className="border-b border-slate-100">
                 <td className="py-2">
-                  <div className="font-medium">{s.name}</div>
+                  <div className="font-medium">
+                    {s.name}
+                    {runtimeWarning(s) !== null && (
+                      <span className="ml-2" title={runtimeWarning(s) ?? ''}>
+                        <Badge tone="amber">⚠ {runtimeWarning(s)}</Badge>
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-slate-400">{s.id}</div>
                 </td>
                 <td className="py-2">{s.transport === 'stdio' ? s.command : s.url}</td>
@@ -209,10 +239,11 @@ function ServerForm(props: {
               data-testid="form-transport"
               className={inputCls}
               value={f.transport}
-              onChange={(e) => set({ transport: e.target.value as 'stdio' | 'http' })}
+              onChange={(e) => set({ transport: e.target.value as 'stdio' | 'http' | 'sse' })}
             >
               <option value="stdio">stdio（本机进程）</option>
-              <option value="http">http（远程 URL）</option>
+              <option value="http">http（远程 streamable）</option>
+              <option value="sse">sse（远程，legacy）</option>
             </select>
           </Field>
           {f.transport === 'stdio' ? (

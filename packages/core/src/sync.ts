@@ -16,24 +16,60 @@ import { promises as fs } from 'node:fs';
  * SyncEngine：把注册表 + 绑定矩阵落成各 agent 的配置变更（C3/C8）。
  *
  * - 直连 server → 按适配器写真实条目（键 = server.id）；
- * - gatewayMode server → 每个该 agent 只写一条公共 GATEWAY_KEY 指向网关；
+ * - gatewayMode server → http 能力 agent 写公共 GATEWAY_KEY 指向网关；
+ * - 不支持 http 的 agent（如 Codex）→ G7 stdio 反向桥命令（桥 URL + token/headers）；
  * - 不再受管的片段（解绑/删除/直连转网关）按 syncState 收敛移除；
- * - 传输不被该 agent 原生支持 → 记入 unsupported 并跳过（建议改网关模式）。
+ * - 无桥可用且传输不支持 → 记入 unsupported 并跳过。
  */
 export class SyncEngine {
   constructor(
-    private readonly opts: { backupsDir?: string; agents?: Record<AgentType, { adapter: AgentAdapter }> } = {},
+    private readonly opts: {
+      backupsDir?: string;
+      agents?: Record<AgentType, { adapter: AgentAdapter }>;
+      /** G7 stdio 反向桥：command + 固定前缀参数（bridge-main.js 路径），daemon 按自身安装路径注入 */
+      stdioBridge?: { command: string; baseArgs: string[] };
+    } = {},
   ) {}
 
   async sync(config: ManagerConfig, input: { dryRun?: boolean; resolutions?: Record<string, ConflictResolution> } = {}): Promise<SyncReport> {
     const report: SyncReport = { perAgent: [] };
     const agents = this.opts.agents ?? AGENTS;
+    let gatewayEntryWritten = false;
     for (const def of AGENT_LIST) {
       const adapter = agents[def.type]?.adapter;
       if (!adapter) continue;
-      report.perAgent.push(await this.syncAgent(def.type, adapter, config, input));
+      const agentReport = await this.syncAgent(def.type, adapter, config, input);
+      if (agentReport.changes.some((c) => c.key === GATEWAY_KEY && c.action === 'upsert')) {
+        gatewayEntryWritten = true;
+      }
+      report.perAgent.push(agentReport);
+    }
+    // M2.4：网关条目已按新 token 重写 → 轮换提醒解除；
+    // 或当前根本没有网关绑定（提醒已无对象）→ 一并解除
+    const anyGatewayBound = config.servers.some(
+      (s) => s.gatewayMode && s.enabled && config.bindings.some((b) => b.serverId === s.id),
+    );
+    if (!input.dryRun && config.settings.tokenRotatedAt && (gatewayEntryWritten || !anyGatewayBound)) {
+      delete config.settings.tokenRotatedAt;
     }
     return report;
+  }
+
+  private bridgeEntry(
+    key: string,
+    url: string,
+    extraHeaders: Record<string, string> | undefined,
+    token: string | undefined,
+  ): RawServerEntry {
+    const bridge = this.opts.stdioBridge!;
+    const args = [...bridge.baseArgs, url];
+    if (token) args.push(`--token=${token}`);
+    for (const [k, v] of Object.entries(extraHeaders ?? {})) {
+      if (k.toLowerCase() === 'authorization') continue; // token 已带 Authorization
+      args.push('--header', `${k}=${v}`);
+    }
+    args.push('--name', key);
+    return { transport: 'stdio', command: bridge.command, args };
   }
 
   private async syncAgent(
@@ -54,34 +90,53 @@ export class SyncEngine {
 
     for (const server of servers) {
       if (server.gatewayMode) continue;
-      if (!adapter.transports.includes(server.transport)) {
+      const native = adapter.transports.includes(server.transport);
+      const httpFamily = server.transport === 'http' || server.transport === 'sse';
+      if (native) {
+        writes.push({ key: server.id, entry: toRawEntry(server) });
+        keyToServer.set(server.id, server.id);
+      } else if (httpFamily && this.opts.stdioBridge) {
+        // G7：经本地 stdio 桥使用远程 server
+        writes.push({
+          key: server.id,
+          entry: this.bridgeEntry(server.id, server.url ?? '', server.headers, undefined),
+        });
+        keyToServer.set(server.id, server.id);
+      } else {
         unsupported.push({
           serverId: server.id,
-          reason: `${agentType} 直连不支持 ${server.transport} 传输，请改用网关模式`,
+          reason: httpFamily
+            ? `${agentType} 直连不支持 ${server.transport} 传输且反向桥不可用`
+            : `${agentType} 不支持 ${server.transport} 传输`,
         });
-        continue;
       }
-      writes.push({ key: server.id, entry: toRawEntry(server) });
-      keyToServer.set(server.id, server.id);
     }
 
     const gatewayServers = servers.filter((s) => s.gatewayMode);
     const hadGatewayKey = previous.some((k) => k.key === GATEWAY_KEY);
     if (gatewayServers.length > 0) {
+      const gatewayUrl = `http://127.0.0.1:${config.settings.port}/mcp`;
       if (adapter.transports.includes('http')) {
         writes.push({
           key: GATEWAY_KEY,
           entry: {
             transport: 'http',
-            url: `http://127.0.0.1:${config.settings.port}/mcp`,
+            url: gatewayUrl,
             headers: { Authorization: `Bearer ${config.settings.token}` },
           },
+        });
+        keyToServer.set(GATEWAY_KEY, undefined);
+      } else if (this.opts.stdioBridge) {
+        // G7：Codex 等经 stdio 桥接入网关
+        writes.push({
+          key: GATEWAY_KEY,
+          entry: this.bridgeEntry(GATEWAY_KEY, gatewayUrl, undefined, config.settings.token),
         });
         keyToServer.set(GATEWAY_KEY, undefined);
       } else {
         unsupported.push({
           serverId: gatewayServers.map((s) => s.id).join(','),
-          reason: `${agentType} 原生不支持 http 传输，网关分发将在 M2 的 stdio 反向桥中支持`,
+          reason: `${agentType} 原生不支持 http 传输且反向桥不可用`,
         });
       }
     } else if (hadGatewayKey) {

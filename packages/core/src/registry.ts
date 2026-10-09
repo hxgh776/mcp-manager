@@ -227,7 +227,7 @@ export function fingerprintOfServer(s: ServerDef): string {
 function toUpsertInput(key: string, entry: RawServerEntry): UpsertServerInput {
   return {
     name: key,
-    transport: entry.transport === 'sse' ? 'http' : entry.transport,
+    transport: entry.transport,
     command: entry.command,
     args: entry.args,
     env: entry.env,

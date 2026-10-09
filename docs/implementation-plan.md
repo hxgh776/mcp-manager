@@ -257,3 +257,19 @@ Settings { port(默认 6280，占用自动+1), token, logLevel }
 | 三 编码实施 | M1.0–M1.7 全部 DoD 达成 | 全部 U/I 用例 CI 绿 |
 | 四 测试验收 | 验收报告（A-01~10 + 性能/安全数据） | A 项全 pass 或带豁免记录 |
 | 五 UI 测试 | E2E 套件绿 + 交互式走查记录 | §5.2 通过标准 |
+
+---
+
+## 附录 A：M2 执行计划（2026-10-09 启动）
+
+M1 已提前完成 Trae/OpenCode 适配器、G6 per-server 端点、G11/S2/S3 日志与进程 UI、Web 管理界面。本迭代锁定范围：
+
+| 里程碑 | 内容 | 说明 |
+|---|---|---|
+| M2.1 | **G7 stdio 反向桥**：`bridge-main.js` 独立桥进程（stdio ↔ streamable HTTP 透传）；同步引擎对不支持 http 的 agent（Codex）改写桥命令——网关模式与直连 http/sse server 均打通 | 替代原"unsupported 跳过"；bridge args 携带 token（进程列表可见为已知取舍，M3 凭证加密一并缓解） |
+| M2.2 | **S5 环境检测**：node/npx/uvx/python/docker/git 探测（`/api/environment`）+ 概览卡片 + 注册表缺运行时警告 | |
+| M2.3 | **SSE 上游兼容**（D4）：ServerDef.transport 增加 `sse`，网关经 SSEClientTransport 连接 legacy 上游；表单/分发适配 | agent 侧仍以 streamable HTTP 为主 |
+| M2.4 | **token 轮换重同步提醒**：`tokenRotatedAt` 标记 + 网关页横幅，同步后清除（验收遗留项） | |
+| M2.5 | **1 小时浸泡补测**（验收遗留项，后台执行） | |
+
+延续到 M3：G12 stdio 多实例隔离、G13 per-agent 分组端点、S4 凭证加密（DPAPI/Keychain）、registry 发现（S7）、调试台（S6）。

@@ -9,7 +9,7 @@ import type { ManagerConfig } from './types.js';
 const serverDefSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   name: z.string().min(1),
-  transport: z.enum(['stdio', 'http']),
+  transport: z.enum(['stdio', 'http', 'sse']),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
@@ -44,6 +44,7 @@ const configSchema = z.object({
     port: z.number().int().min(1).max(65535),
     token: z.string().min(8),
     logLevel: z.enum(['debug', 'info', 'warn', 'error']),
+    tokenRotatedAt: z.string().optional(),
   }),
 });
 

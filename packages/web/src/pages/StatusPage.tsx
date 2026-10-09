@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import type { AgentInfo, ImportGroup, StatusInfo } from '../api';
+import type { AgentInfo, ImportGroup, RuntimeTool, StatusInfo } from '../api';
 import { Badge, Btn, Card, ErrorBanner, OkBanner } from '../ui';
 
 export function StatusPage() {
@@ -17,6 +17,10 @@ export function StatusPage() {
   const imports = useQuery({
     queryKey: ['import-preview'],
     queryFn: () => api.get<{ groups: ImportGroup[] }>('/api/import/preview'),
+  });
+  const environment = useQuery({
+    queryKey: ['environment'],
+    queryFn: () => api.get<{ tools: RuntimeTool[] }>('/api/environment'),
   });
 
   const doImport = useMutation({
@@ -57,6 +61,21 @@ export function StatusPage() {
             </dd>
           </div>
         </dl>
+      </Card>
+
+      <Card title="运行环境">
+        <div className="flex flex-wrap gap-2">
+          {(environment.data?.tools ?? []).map((t) => (
+            <div
+              key={t.name}
+              className="rounded border border-slate-200 px-3 py-1.5 text-sm"
+              title={`${t.role}${t.version !== undefined ? ` · ${t.version}` : ''}`}
+            >
+              {t.found ? <Badge tone="green">{t.name}</Badge> : <Badge tone="red">{t.name} 缺失</Badge>}
+              <span className="ml-2 text-xs text-slate-400">{t.role}</span>
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Card

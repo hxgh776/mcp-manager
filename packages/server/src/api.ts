@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import {
   applyImport,
   deleteServer,
+  detectEnvironment,
   importPreview,
   removeBinding,
   setBinding,
@@ -16,7 +17,7 @@ import type { Router } from './router.js';
 const serverInputObject = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).optional(),
   name: z.string().min(1),
-  transport: z.enum(['stdio', 'http']),
+  transport: z.enum(['stdio', 'http', 'sse']),
   command: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
@@ -82,7 +83,13 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
       gateway: daemon.gatewayStatus(),
       serverCount: daemon.config.servers.length,
       bindingCount: daemon.config.bindings.length,
+      resyncPending: daemon.config.settings.tokenRotatedAt !== undefined,
     });
+  });
+
+  // M2.2：本机 server 运行时探测
+  router.get('/api/environment', async (ctx) => {
+    sendJson(ctx.res, 200, { tools: await detectEnvironment() });
   });
 
   router.get('/api/agents', async (ctx) => {
@@ -248,9 +255,13 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
 
   router.post('/api/settings/token/rotate', async (ctx) => {
     daemon.config.settings.token = randomBytes(24).toString('hex');
+    // M2.4：标记待重同步；sync 重写网关条目后由 SyncEngine 清除
+    daemon.config.settings.tokenRotatedAt = new Date().toISOString();
     await save();
-    // 已分发的网关配置里的 token 失效——提示重新 sync
-    sendJson(ctx.res, 200, { token: daemon.config.settings.token, resyncRequired: daemon.config.bindings.length > 0 });
+    sendJson(ctx.res, 200, {
+      token: daemon.config.settings.token,
+      resyncRequired: daemon.config.bindings.length > 0,
+    });
   });
 
   // —— 网关 ——

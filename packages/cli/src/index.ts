@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { Store } from '@mcp-manager/core';
+import { runBridgeStdio } from '@mcp-manager/server/gateway/bridge';
 import {
   isPidAlive,
   killTree,
@@ -229,8 +230,29 @@ program
     console.log(opts.dryRun ? '\n（dry-run，未落盘）' : '\n同步完成');
   });
 
-const gateway = program.command('gateway').description('MCP 网关');
-gateway
+program
+  .command('bridge')
+  .description('G7 stdio 反向桥：把 streamable HTTP 上游暴露为本地 stdio MCP server')
+  .argument('<url>', '上游 streamable HTTP 地址')
+  .option('--token <token>', '以 Bearer token 鉴权')
+  .option('--header <k=v>', '附加请求头（可重复）', (v: string, prev: string[] = []) => [...prev, v])
+  .option('--name <name>', '桥 server 名称')
+  .action(async (url: string, opts: { token?: string; header?: string[]; name?: string }) => {
+    const headers: Record<string, string> = {};
+    for (const kv of opts.header ?? []) {
+      const idx = kv.indexOf('=');
+      if (idx > 0) headers[kv.slice(0, idx)] = kv.slice(idx + 1);
+    }
+    if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
+    console.error(`[mcpmgr bridge] → ${url}`);
+    await runBridgeStdio({
+      url,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      ...(opts.name ? { name: opts.name } : {}),
+    });
+  });
+
+const gateway = program.command('gateway').description('MCP 网关');gateway
   .command('status')
   .action(async () => {
     const { data } = await api<{ running: boolean; port?: number }>('GET', '/api/gateway');

@@ -25,7 +25,11 @@ beforeEach(async () => {
   sandbox = await fs.mkdtemp(path.join(os.tmpdir(), 'mcpmgr-sync-'));
   agents = makeAgents(sandbox);
   store = new Store(sandbox);
-  engine = new SyncEngine({ backupsDir: store.backupsDir, agents });
+  engine = new SyncEngine({
+    backupsDir: store.backupsDir,
+    agents,
+    stdioBridge: { command: 'node', baseArgs: ['C:/tools/mcpmgr/bridge-main.js'] },
+  });
   config = await store.load();
 });
 
@@ -175,7 +179,7 @@ describe('sync engine (I-SY)', () => {
     expect(doc.mcpServers['filesystem']).toBeUndefined();
   });
 
-  it('I-SY-03 网关模式：写公共 GATEWAY_KEY（URL+Bearer），无直连条目；codex 报不支持', async () => {
+  it('I-SY-03 网关模式：http agent 写 GATEWAY_KEY；Codex 经 G7 反向桥接入网关', async () => {
     await writeAgentFile(['.codex', 'config.toml'], '# my config\n');
     addStdioServer('notion', 'Notion');
     config.servers[0]!.gatewayMode = true;
@@ -193,19 +197,30 @@ describe('sync engine (I-SY)', () => {
       headers: { Authorization: `Bearer ${config.settings.token}` },
     });
 
+    const codexText = await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8');
+    expect(codexText).toContain('[mcp_servers.mcp-manager-gateway]');
+    expect(codexText).toContain('bridge-main.js');
+    expect(codexText).toContain(`http://127.0.0.1:${config.settings.port}/mcp`);
+    expect(codexText).toContain(`--token=${config.settings.token}`);
     const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
-    expect(codexReport.unsupported[0]?.reason).toContain('反向桥');
-    expect(await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8')).not.toContain('mcp-manager-gateway');
+    expect(codexReport.unsupported).toHaveLength(0);
   });
 
-  it('I-SY-04 直连不支持传输 → unsupported 且不写', async () => {
+  it('I-SY-04 直连 http server 在 Codex 上经反向桥分发', async () => {
     await writeAgentFile(['.codex', 'config.toml'], '# my config\n');
-    upsertServer(config, { id: 'web-api', name: 'Web API', transport: 'http', url: 'https://api.example.com/mcp' });
+    upsertServer(config, {
+      id: 'web-api', name: 'Web API', transport: 'http', url: 'https://api.example.com/mcp',
+      headers: { 'X-API-Key': 'k-1' },
+    });
     setBinding(config, 'web-api', 'codex');
     const report = await engine.sync(config);
     const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
-    expect(codexReport.unsupported).toHaveLength(1);
-    expect(await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8')).not.toContain('web-api');
+    expect(codexReport.unsupported).toHaveLength(0);
+    const codexText = await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8');
+    expect(codexText).toContain('[mcp_servers.web-api]');
+    expect(codexText).toContain('https://api.example.com/mcp');
+    expect(codexText).toContain('--header');
+    expect(codexText).toContain('X-API-Key=k-1');
   });
 
   it('I-SY-05 手改片段 → 冲突报告；override 后覆盖', async () => {

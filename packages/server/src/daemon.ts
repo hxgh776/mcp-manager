@@ -83,6 +83,8 @@ export class Daemon {
     const agentRoot = opts.agentConfigRoot ?? process.env['MCP_MANAGER_AGENT_HOME'];
     this.sync = new SyncEngine({
       backupsDir: this.store.backupsDir,
+      // G7：stdio 反向桥脚本与本 daemon 同目录（dist/bridge-main.js）
+      stdioBridge: { command: 'node', baseArgs: [path.join(import.meta.dirname, 'bridge-main.js')] },
       ...(agentRoot ? { agents: makeAgents(agentRoot) } : {}),
     });
     if (!agentRoot && (opts.homeDir || process.env['MCP_MANAGER_HOME'])) {

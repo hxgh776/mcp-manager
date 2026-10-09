@@ -1,6 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerDef } from '@mcp-manager/core';
 import type { Logger } from '../logger.js';
@@ -26,7 +27,7 @@ export class Upstream {
   readonly stderrRing: string[] = [];
 
   private client: Client | null = null;
-  private transport: StdioClientTransport | StreamableHTTPClientTransport | null = null;
+  private transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport | null = null;
   private connecting: Promise<Client> | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private restartAttempts = 0;
@@ -82,6 +83,13 @@ export class Upstream {
         env: { ...getDefaultEnvironment(), ...(this.def.env ?? {}) },
         ...(this.def.cwd ? { cwd: this.def.cwd } : {}),
         stderr: 'pipe',
+      });
+    } else if (this.def.transport === 'sse') {
+      // M2.3：legacy SSE 上游（D4 兼容）
+      if (!this.def.url) throw new Error('sse 上游缺少 url');
+      this.transport = new SSEClientTransport(new URL(this.def.url), {
+        eventSourceInit: { fetch: (input, init) => fetch(input, { ...init, headers: { ...(this.def.headers ?? {}) } }) },
+        requestInit: { headers: { ...(this.def.headers ?? {}) } },
       });
     } else {
       if (!this.def.url) throw new Error('http 上游缺少 url');

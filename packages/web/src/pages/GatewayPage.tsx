@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import type { GatewayInfo } from '../api';
+import type { GatewayInfo, StatusInfo } from '../api';
 import { Badge, Btn, Card, ErrorBanner, OkBanner } from '../ui';
 
 export function GatewayPage() {
@@ -11,7 +11,7 @@ export function GatewayPage() {
 
   const status = useQuery({
     queryKey: ['status'],
-    queryFn: () => api.get<{ port: number }>('/api/status'),
+    queryFn: () => api.get<StatusInfo>('/api/status'),
   });
   const gateway = useQuery({
     queryKey: ['gateway'],
@@ -56,6 +56,16 @@ export function GatewayPage() {
     <div>
       <ErrorBanner message={error} />
       <OkBanner message={ok} />
+
+      {status.data?.resyncPending === true && (
+        <div data-testid="resync-banner" className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          ⚠ token 已轮换，已分发的网关配置仍在用旧 token——请到
+          <button className="mx-1 underline" onClick={() => switchToSync()}>
+            「分发」页
+          </button>
+          重新同步后此提醒才会消除。
+        </div>
+      )}
 
       <Card
         title="聚合端点"
@@ -157,6 +167,12 @@ export function GatewayPage() {
     </div>
   );
 }
+
+const switchToSync = (): void => {
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', 'sync');
+  window.location.href = url.toString();
+};
 
 function UpstreamBadge({ status }: { status: string }) {
   if (status === 'ready') return <Badge tone="green">ready</Badge>;

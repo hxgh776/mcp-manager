@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -127,8 +128,63 @@ beforeEach(async () => {
 });
 
 let httpUpstream: FakeHttpUpstream;
+const cleanups: Array<() => Promise<void>> = [];
+
+/** M2.3：legacy SSE 上游 fixture（GET /sse + POST /messages 双端点） */
+async function startFakeSseUpstream(): Promise<{ url: string; close: () => Promise<void> }> {
+  let sseTransport: SSEServerTransport | null = null;
+  const makeServer = (): Server => {
+    const server = new Server(
+      { name: 'fake-sse-upstream', version: '1.0.0' },
+      { capabilities: { tools: {} } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: [
+        {
+          name: 'sse_tool',
+          description: 'from sse upstream',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    }));
+    server.setRequestHandler(CallToolRequestSchema, async (req2) => ({
+      content: [{ type: 'text', text: `sse:${String(req2.params.name)}` }],
+    }));
+    return server;
+  };
+  const httpServer = http.createServer(async (req, res) => {
+    const url = req.url ?? '';
+    if (req.method === 'GET' && url.startsWith('/sse')) {
+      const server = makeServer();
+      sseTransport = new SSEServerTransport('/messages', res);
+      await server.connect(sseTransport);
+      return; // SSE 长连接保持
+    }
+    if (req.method === 'POST' && url.startsWith('/messages')) {
+      if (sseTransport !== null) {
+        await sseTransport.handlePostMessage(req, res);
+        return;
+      }
+      res.writeHead(503).end();
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r));
+  const addr = httpServer.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  return {
+    url: `http://127.0.0.1:${port}/sse`,
+    close: async () => {
+      httpServer.closeAllConnections();
+      await new Promise<void>((r) => httpServer.close(() => r()));
+    },
+  };
+}
 
 afterEach(async () => {
+  for (const fn of cleanups.reverse()) await fn().catch(() => {});
+  cleanups.length = 0;
   await daemon.stop();
   await httpUpstream?.close();
   await fs.rm(sandbox, { recursive: true, force: true });
@@ -283,5 +339,26 @@ describe('gateway aggregate endpoint (I-GW)', () => {
     const hit = calls.find((c) => c.tool === 'echo' && c.serverId === 'fs-a');
     expect(hit).toBeDefined();
     expect(hit!.ok).toBe(true);
+  });
+
+  it('M2.3 SSE 上游：legacy SSE server 经网关聚合与调用', async () => {
+    const sseUp = await startFakeSseUpstream();
+    cleanups.push(sseUp.close);
+    await api('POST', '/api/servers', {
+      id: 'legacy-sse',
+      name: 'legacy-sse',
+      transport: 'sse',
+      url: sseUp.url,
+      gatewayMode: true,
+    });
+
+    const client = await connectClient();
+    const tools = await client.listTools();
+    expect(tools.tools.map((t) => t.name)).toContain('sse_tool');
+    const res = (await client.callTool({ name: 'sse_tool', arguments: {} })) as {
+      content: Array<{ text: string }>;
+    };
+    expect(res.content[0]!.text).toBe('sse:sse_tool');
+    await client.close();
   });
 });
