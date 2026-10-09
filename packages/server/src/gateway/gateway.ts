@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, statSync, readFileSync, openSync, readSync, closeSync } from 'node:fs';
 import path from 'node:path';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { checkToken, sendError } from '../http-util.js';
@@ -84,7 +84,8 @@ export class Gateway {
       }
     };
     this.daemon.upstreamLogs = (id) => this.mgr.peek(id)?.stderrRing ?? [];
-    this.daemon.recentCalls = () => this.recentCalls;
+    // Issue-3：从 ndjson 尾部读取，daemon 重启后日志不丢；文件不可读时回退内存环
+    this.daemon.recentCalls = () => this.readRecentCallsFromDisk();
     this.daemon.logger.info('gateway attached');
   }
 
@@ -105,6 +106,42 @@ export class Gateway {
     this.recentCalls.push(record);
     if (this.recentCalls.length > CALLS_LOG_MAX_MEMORY) this.recentCalls.shift();
     void fs.appendFile(this.callsLogFile, `${JSON.stringify(record)}\n`, 'utf8').catch(() => {});
+  }
+
+  /** 读取 ndjson 尾部（最多 256KB / 200 条），跳过损坏行 */
+  private readRecentCallsFromDisk(): CallRecord[] {
+    try {
+      const st = statSync(this.callsLogFile);
+      if (!st.isFile() || st.size === 0) return this.recentCalls;
+      const TAIL = 256 * 1024;
+      const start = Math.max(0, st.size - TAIL);
+      let text: string;
+      if (start === 0) {
+        text = readFileSync(this.callsLogFile, 'utf8');
+      } else {
+        const fd = openSync(this.callsLogFile, 'r');
+        try {
+          const buf = Buffer.alloc(st.size - start);
+          readSync(fd, buf, 0, buf.length, start);
+          text = buf.toString('utf8');
+        } finally {
+          closeSync(fd);
+        }
+      }
+      const lines = text.split('\n').filter((l) => l.trim() !== '');
+      if (start > 0 && lines.length > 0) lines.shift(); // 首行可能被截断
+      const out: CallRecord[] = [];
+      for (const line of lines) {
+        try {
+          out.push(JSON.parse(line) as CallRecord);
+        } catch {
+          // 跳过损坏行
+        }
+      }
+      return out.slice(-200);
+    } catch {
+      return this.recentCalls;
+    }
   }
 
   private httpHandler(): GatewayHttpHandler {

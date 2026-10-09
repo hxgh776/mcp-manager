@@ -89,6 +89,11 @@ describe('registry CRUD (I-AP-01)', () => {
 
     const invalid = await api('POST', '/api/servers', { name: 'X', transport: 'stdio' });
     expect(invalid.status).toBe(400); // 缺 command
+    // Issue-2：校验错误为友好中文文案，而非 zod 原始 JSON
+    const msg = String(invalid.data.error);
+    expect(msg).toContain('命令');
+    expect(msg).toContain('stdio');
+    expect(msg).not.toContain('too_small');
   });
 });
 

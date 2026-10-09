@@ -38,6 +38,36 @@ const serverInputSchema = serverInputObject.superRefine((val, ctx) => {
   }
 });
 
+/** 表单字段的中文显示名（Issue-2：校验错误对用户友好） */
+const FIELD_ZH: Record<string, string> = {
+  id: 'ID',
+  name: '名称',
+  transport: '传输类型',
+  command: '命令',
+  args: '参数',
+  env: '环境变量',
+  cwd: '工作目录',
+  url: 'URL',
+  headers: '请求头',
+  gatewayMode: '网关模式',
+  enabled: '启用',
+  toolOverrides: '工具开关',
+};
+
+function formatZodIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => {
+      const field = issue.path.join('.');
+      const zh = FIELD_ZH[field] ?? field ?? '';
+      let msg = issue.message;
+      if (issue.code === 'too_small' && (issue as { type?: string }).type === 'string') msg = '不能为空';
+      else if (issue.code === 'invalid_string') msg = '格式不正确';
+      else if (issue.code === 'invalid_type') msg = '类型不正确';
+      return zh !== '' ? `${zh}：${msg}` : msg;
+    })
+    .join('；');
+}
+
 export function registerApiRoutes(router: Router, daemon: Daemon): void {
   const save = () => daemon.saveConfig();
 
@@ -77,7 +107,7 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
 
   router.post('/api/servers', async (ctx) => {
     const parsed = serverInputSchema.safeParse(await ctx.body());
-    if (!parsed.success) return sendError(ctx.res, 400, parsed.error.message);
+    if (!parsed.success) return sendError(ctx.res, 400, formatZodIssues(parsed.error));
     const def = upsertServer(daemon.config, parsed.data as UpsertServerInput);
     await save();
     sendJson(ctx.res, 201, { server: def });
@@ -94,7 +124,7 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
     const def = daemon.config.servers.find((s) => s.id === id);
     if (!def) return sendError(ctx.res, 404, 'server 不存在');
     const parsed = serverInputObject.partial().safeParse(await ctx.body());
-    if (!parsed.success) return sendError(ctx.res, 400, parsed.error.message);
+    if (!parsed.success) return sendError(ctx.res, 400, formatZodIssues(parsed.error));
     upsertServer(daemon.config, { ...parsed.data, id, name: parsed.data.name ?? def.name, transport: parsed.data.transport ?? def.transport });
     await save();
     sendJson(ctx.res, 200, { server: daemon.config.servers.find((s) => s.id === id) });

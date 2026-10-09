@@ -260,4 +260,28 @@ describe('gateway aggregate endpoint (I-GW)', () => {
     const gw = (await api('GET', '/api/gateway')).data as { upstreams: Array<{ id: string; status: string }> };
     expect(gw.upstreams.find((u) => u.id === 'fs-a')?.status).toBe('idle');
   });
+
+  it('Issue-3：调用日志跨 daemon 重启持久（读 ndjson 尾部）', async () => {
+    const client = await connectClient();
+    await client.callTool({ name: 'fs-a__echo', arguments: { message: 'before-restart' } });
+    await client.close();
+
+    // 重启 daemon（同一数据目录）
+    const homeDir = daemon.store.homeDir;
+    const agentRoot = homeDir;
+    await daemon.stop();
+    daemon = new Daemon({ homeDir, agentConfigRoot: agentRoot, port: 0 });
+    await daemon.start();
+    base = daemon.baseUrl;
+    token = daemon.config.settings.token;
+
+    const calls = (await api('GET', '/api/logs/calls')).data.calls as Array<{
+      serverId: string;
+      tool: string;
+      ok: boolean;
+    }>;
+    const hit = calls.find((c) => c.tool === 'echo' && c.serverId === 'fs-a');
+    expect(hit).toBeDefined();
+    expect(hit!.ok).toBe(true);
+  });
 });

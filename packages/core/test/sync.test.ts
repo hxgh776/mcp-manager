@@ -91,6 +91,23 @@ describe('detect + import (U-IM / C1 C5)', () => {
     const groups2 = await importPreview(agents);
     expect(applyImport(config, groups2)).toHaveLength(0);
   });
+
+  it('Issue-1：导入预览排除网关公共条目 mcp-manager-gateway', async () => {
+    await fs.mkdir(path.join(sandbox, '.cursor'), { recursive: true });
+    await fs.writeFile(
+      path.join(sandbox, '.cursor', 'mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          'mcp-manager-gateway': { url: 'http://127.0.0.1:6280/mcp', headers: { Authorization: 'Bearer x' } },
+          real: { command: 'node', args: ['real.js'] },
+        },
+      }),
+      'utf8',
+    );
+    const groups = await importPreview(agents);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.suggested.name).toBe('real');
+  });
 });
 
 describe('sync engine (I-SY)', () => {

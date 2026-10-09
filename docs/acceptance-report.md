@@ -55,13 +55,13 @@
 | T7 工具开关弹窗：真实上游 3 工具、停用/启用联动 | ✅ | t7_tools_modal_echo_disabled.png |
 | T8 布局 1920×1080：居中缩放、5 列卡片、无溢出 | ✅ | t7_layout_1920.png |
 
-### 发现的改进项（均不阻塞验收，记入 M2 待办）
+### 发现的改进项（验收后已全部修复，见提交 "fix: resolve acceptance issues 1-3"）
 
-| # | 级别 | 问题 | 建议 |
+| # | 级别 | 问题 | 修复 |
 |---|---|---|---|
-| Issue-1 | 低 | 导入预览把自身写入的 `mcp-manager-gateway` 公共条目当作可导入候选 | 导入器排除 GATEWAY_KEY 键 |
-| Issue-2 | 中 | 表单校验失败时错误横幅显示 zod 原始 JSON，不友好 | 将 zod issues 映射为按字段的中文提示 |
-| Issue-3 | 低 | 网关调用日志仅存内存环（ndjson 已落盘但 API 只读内存），daemon 重启后 UI 清零 | API 改为读 ndjson 尾部 |
+| Issue-1 | 低 | 导入预览把自身写入的 `mcp-manager-gateway` 公共条目当作可导入候选 | ✅ 导入器排除 GATEWAY_KEY（新增单测） |
+| Issue-2 | 中 | 表单校验失败时错误横幅显示 zod 原始 JSON，不友好 | ✅ 服务端将 zod issues 格式化为中文字段文案（实测横幅显示"名称：不能为空；命令：stdio 传输需要 command"） |
+| Issue-3 | 低 | 网关调用日志仅存内存环，daemon 重启后 UI 清零 | ✅ API 改读 ndjson 尾部（≤256KB/200 条，跳过损坏行），跨重启持久（新增集成测试 + 浏览器实测） |
 
 ### 测试运行时备注（工具侧，非页面缺陷）
 
@@ -71,5 +71,5 @@
 
 ## 遗留与后续
 
-1. M2 待办新增：上述 3 个 Issue + 1 小时浸泡补测 + 多轮 token 轮换后的网关配置重同步提醒强化。
+1. M2 待办：1 小时浸泡补测 + 多轮 token 轮换后的网关配置重同步提醒强化。（验收发现的 3 个 Issue 已全部修复并通过回归，50/50 测试全绿）
 2. 测试数据清理：所有真实 agent 配置已恢复快照态；验收产物保留在 `.acceptance/`（已 gitignore），快照目录 `~/.mcp-manager-acceptance-snapshot-20261009-081250/` 建议保留至下一轮验收后删除。

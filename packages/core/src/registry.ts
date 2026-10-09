@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { AGENT_LIST, AGENTS, makeAgents } from './agents.js';
 import type { AgentAdapter, RawServerEntry } from './adapters/types.js';
+import { GATEWAY_KEY } from './types.js';
 import type {
   AgentBinding,
   AgentDetection,
@@ -180,6 +181,7 @@ export async function importPreview(
     for (const file of adapter.candidatePaths()) {
       const servers = await adapter.read(file);
       for (const [key, entry] of servers) {
+        if (key === GATEWAY_KEY) continue; // 自身写入的网关公共条目不是导入候选（Issue-1）
         all.push({ agentType: def.type, key, entry, fingerprint: fingerprintOf(entry) });
       }
     }
