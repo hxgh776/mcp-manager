@@ -1,15 +1,15 @@
 // E2E 冒烟：token 门 → 概览 → 添加 server → 分发预览 → 网关页。
 // daemon 由 helpers 启动（沙箱 HOME + 沙箱 agent 配置根）。
-import { afterAll, beforeAll, expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { startTestDaemon, type TestDaemon } from './helpers';
 
 let daemon: TestDaemon;
 
-beforeAll(async () => {
+test.beforeAll(async () => {
   daemon = await startTestDaemon();
 });
 
-afterAll(async () => {
+test.afterAll(async () => {
   await daemon?.stop();
 });
 
