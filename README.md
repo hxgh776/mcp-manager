@@ -1,5 +1,7 @@
 # MCP Manager
 
+[![CI](https://github.com/hxgh776/mcp-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/hxgh776/mcp-manager/actions/workflows/ci.yml)
+
 面向开发者个人电脑的 **MCP 控制平面**：MCP Server 配置一次，多个 AI Coding Agent（Claude Code、Codex、Cursor、Trae、OpenCode）一键启用；可选网关模式统一聚合、代理、过滤与观测所有 MCP 流量。
 
 - 需求分析：[docs/requirements-analysis.md](docs/requirements-analysis.md)
