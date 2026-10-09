@@ -272,4 +272,17 @@ M1 已提前完成 Trae/OpenCode 适配器、G6 per-server 端点、G11/S2/S3 �
 | M2.4 | **token 轮换重同步提醒**：`tokenRotatedAt` 标记 + 网关页横幅，同步后清除（验收遗留项） | |
 | M2.5 | **1 小时浸泡补测**（验收遗留项，后台执行） | |
 
+### 附录 A.2：M3 执行计划（2026-10-09 启动）
+
+| 里程碑 | 内容 | 备注 |
+|---|---|---|
+| M3.1 | **S6 调试台**：`POST /api/servers/:id/invoke` + 工具弹窗调试面板（JSON 参数 → 结果面板），调用记入日志（scope=debug） | |
+| M3.2 | **G12 落地为并发度控制**：ServerDef.`concurrency`（1-16，默认 1=串行），Upstream 信号量限流 | 设计偏差说明：聚合端点为 stateless，无"客户端会话"概念，原"per-client 多实例"不可定义；并发度控制是同等风险（单会话上游保护）下更实用的形态 |
+| M3.3 | **G13 per-agent 分组端点**：`/agents/:type/mcp` 只聚合该 agent 绑定的网关 server；同步写入分组 URL；工具索引按 scope 隔离 | |
+| M3.4 | **S4 凭证加密**：Windows DPAPI（PowerShell ProtectedData，CurrentUser）加密 ServerDef.env/headers 静态数据（`dpapi:v1:` 前缀）；使用点透明解密；macOS/Linux 明文回退（M4 接 Keychain/libsecret） | 解密经 base64 传输规避控制台编码损坏 |
+| M3.5 | **新增适配器**：Claude Desktop（分平台路径）/ Windsurf / Gemini CLI（httpUrl/sse 形态），共 8 个 agent | |
+| M3.6 | **S7 registry 发现**：官方 registry 搜索代理 + 条目映射（streamable-http/sse/npm/pypi → ServerDef 建议）+「发现」页一键以网关模式添加 | 网络不可达时 502 优雅降级；映射逻辑单测覆盖 |
+
+推迟到 M4：C7 项目级作用域、VS Code 适配器、macOS Keychain/Linux libsecret 加密后端、G12 per-client 隔离（若有状态上游需求）。 |
+
 延续到 M3：G12 stdio 多实例隔离、G13 per-agent 分组端点、S4 凭证加密（DPAPI/Keychain）、registry 发现（S7）、调试台（S6）。

@@ -1,5 +1,6 @@
 import { AGENT_LIST } from './agents.js';
 import { backupFile } from './backup.js';
+import { decryptRecord } from './secretbox.js';
 import type { AgentAdapter, ConflictInfo, ConflictResolution, FragmentWrite, RawServerEntry } from './adapters/types.js';
 import { boundServers } from './registry.js';
 import { AGENTS } from './agents.js';
@@ -93,7 +94,11 @@ export class SyncEngine {
       const native = adapter.transports.includes(server.transport);
       const httpFamily = server.transport === 'http' || server.transport === 'sse';
       if (native) {
-        writes.push({ key: server.id, entry: toRawEntry(server) });
+        // S4：静态加密的 env/headers 在直连分发时解密（agent 进程需真实读取）
+        const entry = toRawEntry(server);
+        entry.env = await decryptRecord(entry.env);
+        entry.headers = await decryptRecord(entry.headers);
+        writes.push({ key: server.id, entry });
         keyToServer.set(server.id, server.id);
       } else if (httpFamily && this.opts.stdioBridge) {
         // G7：经本地 stdio 桥使用远程 server
@@ -114,23 +119,24 @@ export class SyncEngine {
 
     const gatewayServers = servers.filter((s) => s.gatewayMode);
     const hadGatewayKey = previous.some((k) => k.key === GATEWAY_KEY);
+    // M3.3 G13：per-agent 分组端点——该 agent 只看到自己绑定的网关 server
+    const agentGatewayUrl = `http://127.0.0.1:${config.settings.port}/agents/${agentType}/mcp`;
     if (gatewayServers.length > 0) {
-      const gatewayUrl = `http://127.0.0.1:${config.settings.port}/mcp`;
       if (adapter.transports.includes('http')) {
         writes.push({
           key: GATEWAY_KEY,
           entry: {
             transport: 'http',
-            url: gatewayUrl,
+            url: agentGatewayUrl,
             headers: { Authorization: `Bearer ${config.settings.token}` },
           },
         });
         keyToServer.set(GATEWAY_KEY, undefined);
       } else if (this.opts.stdioBridge) {
-        // G7：Codex 等经 stdio 桥接入网关
+        // G7：Codex 等经 stdio 桥接入分组网关端点
         writes.push({
           key: GATEWAY_KEY,
-          entry: this.bridgeEntry(GATEWAY_KEY, gatewayUrl, undefined, config.settings.token),
+          entry: this.bridgeEntry(GATEWAY_KEY, agentGatewayUrl, undefined, config.settings.token),
         });
         keyToServer.set(GATEWAY_KEY, undefined);
       } else {

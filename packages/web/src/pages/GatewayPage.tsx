@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
-import type { GatewayInfo, StatusInfo } from '../api';
+import type { AgentInfo, GatewayInfo, StatusInfo } from '../api';
 import { Badge, Btn, Card, ErrorBanner, OkBanner } from '../ui';
 
 export function GatewayPage() {
@@ -21,6 +21,10 @@ export function GatewayPage() {
   const token = useQuery({
     queryKey: ['token'],
     queryFn: () => api.get<{ token: string }>('/api/settings/token'),
+  });
+  const agents = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.get<{ agents: AgentInfo[] }>('/api/agents'),
   });
 
   const control = useMutation({
@@ -99,6 +103,38 @@ export function GatewayPage() {
         <p className="text-xs text-slate-400">
           把这个端点配到任意 agent（Authorization: Bearer &lt;token&gt;），即可使用所有「网关模式」server 的工具。
         </p>
+      </Card>
+
+      <Card title="Agent 分组端点（G13）">
+        <p className="mb-3 text-xs text-slate-400">
+          每个 agent 只看到自己绑定的网关 server——同步时写入的就是该 agent 的分组 URL。
+        </p>
+        <table className="w-full text-sm">
+          <tbody>
+            {(agents.data?.agents ?? [])
+              .filter((a) => a.boundServerIds.length > 0)
+              .map((a) => (
+                <tr key={a.agentType} className="border-b border-slate-100">
+                  <td className="py-2 font-medium">{a.displayName}</td>
+                  <td className="py-2">
+                    <code className="rounded bg-slate-100 px-2 py-1 text-xs">
+                      http://127.0.0.1:{status.data?.port}/agents/{a.agentType}/mcp
+                    </code>
+                  </td>
+                  <td className="py-2 text-right text-xs text-slate-500">
+                    绑定 {a.boundServerIds.length} 个
+                  </td>
+                </tr>
+              ))}
+            {(agents.data?.agents ?? []).filter((a) => a.boundServerIds.length > 0).length === 0 && (
+              <tr>
+                <td className="py-4 text-center text-slate-400" colSpan={3}>
+                  暂无绑定——到「分发」页勾选后，这里会出现各 agent 的分组端点。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </Card>
 
       <Card title="上游进程">

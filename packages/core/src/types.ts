@@ -1,6 +1,15 @@
 /** 领域类型——MCP Manager 单一事实来源的数据模型。 */
 
-export const AGENT_TYPES = ['claude-code', 'codex', 'cursor', 'trae', 'opencode'] as const;
+export const AGENT_TYPES = [
+  'claude-code',
+  'codex',
+  'cursor',
+  'trae',
+  'opencode',
+  'claude-desktop',
+  'windsurf',
+  'gemini-cli',
+] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
 
 export type TransportType = 'stdio' | 'http' | 'sse';
@@ -24,6 +33,8 @@ export interface ServerDef {
   enabled: boolean;
   /** G4：工具级开关，键为上游工具原始名 */
   toolOverrides?: Record<string, { enabled: boolean }>;
+  /** M3.2 G12：stdio 上游并发度（1=串行最安全；支持并发的 server 可调高） */
+  concurrency?: number;
   createdAt: string;
   updatedAt: string;
 }

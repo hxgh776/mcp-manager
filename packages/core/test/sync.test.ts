@@ -193,14 +193,14 @@ describe('sync engine (I-SY)', () => {
     expect(claude.mcpServers['notion']).toBeUndefined();
     expect(claude.mcpServers[GATEWAY_KEY]).toEqual({
       type: 'http',
-      url: `http://127.0.0.1:${config.settings.port}/mcp`,
+      url: `http://127.0.0.1:${config.settings.port}/agents/claude-code/mcp`,
       headers: { Authorization: `Bearer ${config.settings.token}` },
     });
 
     const codexText = await fs.readFile(path.join(sandbox, '.codex', 'config.toml'), 'utf8');
     expect(codexText).toContain('[mcp_servers.mcp-manager-gateway]');
     expect(codexText).toContain('bridge-main.js');
-    expect(codexText).toContain(`http://127.0.0.1:${config.settings.port}/mcp`);
+    expect(codexText).toContain(`http://127.0.0.1:${config.settings.port}/agents/codex/mcp`);
     expect(codexText).toContain(`--token=${config.settings.token}`);
     const codexReport = report.perAgent.find((r) => r.agentType === 'codex')!;
     expect(codexReport.unsupported).toHaveLength(0);

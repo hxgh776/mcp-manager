@@ -17,7 +17,8 @@ const CALLS_LOG_MAX_MEMORY = 500;
 export class Gateway {
   private mgr: UpstreamManager;
   private running = false;
-  private toolIndex = new Map<string, ToolIndexEntry>();
+  /** M3.3：每个 endpoint scope 一个工具索引（stateless 下跨请求持存） */
+  private toolIndexes = new Map<string, Map<string, ToolIndexEntry>>();
   private recentCalls: CallRecord[] = [];
   private callsLogFile: string;
 
@@ -27,6 +28,45 @@ export class Gateway {
       daemon.logger,
     );
     this.callsLogFile = path.join(daemon.store.logsDir, 'gateway-calls.ndjson');
+  }
+
+  private toolIndexFor(scope: string): Map<string, ToolIndexEntry> {
+    let idx = this.toolIndexes.get(scope);
+    if (idx === undefined) {
+      idx = new Map();
+      this.toolIndexes.set(scope, idx);
+    }
+    return idx;
+  }
+
+  /** M3.1 调试台（S6）：直接调用某 server 的某工具 */
+  async invokeTool(id: string, tool: string, args: Record<string, unknown>): Promise<unknown> {
+    const upstream = this.mgr.get(id);
+    if (!upstream) throw new Error(`上游不存在或未启用: ${id}`);
+    const started = Date.now();
+    try {
+      const result = await upstream.callTool(tool, args);
+      this.recordCall({
+        ts: new Date().toISOString(),
+        scope: 'debug',
+        serverId: id,
+        tool,
+        ok: !(result as { isError?: boolean }).isError,
+        durationMs: Date.now() - started,
+      });
+      return result;
+    } catch (err) {
+      this.recordCall({
+        ts: new Date().toISOString(),
+        scope: 'debug',
+        serverId: id,
+        tool,
+        ok: false,
+        durationMs: Date.now() - started,
+        error: String((err as Error).message ?? err),
+      });
+      throw err;
+    }
   }
 
   get status(): GatewayStatus {
@@ -86,6 +126,8 @@ export class Gateway {
     this.daemon.upstreamLogs = (id) => this.mgr.peek(id)?.stderrRing ?? [];
     // Issue-3：从 ndjson 尾部读取，daemon 重启后日志不丢；文件不可读时回退内存环
     this.daemon.recentCalls = () => this.readRecentCallsFromDisk();
+    // M3.1 调试台（S6）
+    this.daemon.invokeTool = (id, tool, args) => this.invokeTool(id, tool, args);
     this.daemon.logger.info('gateway attached');
   }
 
@@ -157,11 +199,20 @@ export class Gateway {
       }
 
       let upstreamId: string | null = null;
+      let agentScope: string | null = null;
       if (pathname !== '/mcp') {
-        const m = /^\/servers\/([^/]+)\/mcp$/.exec(pathname);
-        upstreamId = m ? decodeURIComponent(m[1]!) : null;
-        if (!upstreamId || !this.mgr.has(upstreamId)) {
-          sendError(res, 404, `上游不存在或未启用: ${upstreamId ?? ''}`);
+        const perServer = /^\/servers\/([^/]+)\/mcp$/.exec(pathname);
+        const perAgent = /^\/agents\/([^/]+)\/mcp$/.exec(pathname);
+        if (perServer !== null) {
+          upstreamId = decodeURIComponent(perServer[1]!);
+          if (!this.mgr.has(upstreamId)) {
+            sendError(res, 404, `上游不存在或未启用: ${upstreamId}`);
+            return true;
+          }
+        } else if (perAgent !== null) {
+          agentScope = decodeURIComponent(perAgent[1]!);
+        } else {
+          sendError(res, 404, 'not found');
           return true;
         }
       }
@@ -170,16 +221,36 @@ export class Gateway {
         sessionIdGenerator: undefined, // stateless：规避各 agent 会话行为差异（§1.5-C）
         enableJsonResponse: true,
       });
-      const server = upstreamId
-        ? createSingleServerServer(this.mgr, upstreamId, {
-            scope: `single:${upstreamId}`,
-            onCall: (r) => this.recordCall(r),
-          })
-        : createAggregateServer(this.mgr, {
-            scope: 'aggregate',
-            onCall: (r) => this.recordCall(r),
-            toolIndex: this.toolIndex,
-          });
+      let server;
+      let scope: string;
+      if (upstreamId !== null) {
+        scope = `single:${upstreamId}`;
+        server = createSingleServerServer(this.mgr, upstreamId, {
+          scope,
+          onCall: (r) => this.recordCall(r),
+        });
+      } else if (agentScope !== null) {
+        // M3.3 G13：per-agent 分组端点——该 agent 绑定的网关 server 子集
+        scope = `agent:${agentScope}`;
+        const bound = new Set(
+          this.daemon.config.bindings
+            .filter((b) => b.agentType === agentScope)
+            .map((b) => b.serverId),
+        );
+        server = createAggregateServer(this.mgr, {
+          scope,
+          onCall: (r) => this.recordCall(r),
+          toolIndex: this.toolIndexFor(scope),
+          filter: (d) => bound.has(d.id),
+        });
+      } else {
+        scope = 'aggregate';
+        server = createAggregateServer(this.mgr, {
+          scope,
+          onCall: (r) => this.recordCall(r),
+          toolIndex: this.toolIndexFor(scope),
+        });
+      }
       res.on('close', () => {
         void transport.close().catch(() => {});
         void server.close().catch(() => {});

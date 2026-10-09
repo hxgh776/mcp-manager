@@ -7,10 +7,12 @@ import { ServersPage } from './pages/ServersPage';
 import { SyncPage } from './pages/SyncPage';
 import { GatewayPage } from './pages/GatewayPage';
 import { LogsPage } from './pages/LogsPage';
+import { DiscoveryPage } from './pages/DiscoveryPage';
 
 const TABS = [
   { key: 'status', label: '概览' },
   { key: 'servers', label: 'Server 注册表' },
+  { key: 'discovery', label: '发现' },
   { key: 'sync', label: '分发' },
   { key: 'gateway', label: '网关' },
   { key: 'logs', label: '日志' },
@@ -96,6 +98,7 @@ export default function App() {
       <main>
         {tab === 'status' && <StatusPage />}
         {tab === 'servers' && <ServersPage />}
+        {tab === 'discovery' && <DiscoveryPage />}
         {tab === 'sync' && <SyncPage />}
         {tab === 'gateway' && <GatewayPage />}
         {tab === 'logs' && <LogsPage />}

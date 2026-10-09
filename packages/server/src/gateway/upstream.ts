@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { decryptRecord } from '@mcp-manager/core';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ServerDef } from '@mcp-manager/core';
 import type { Logger } from '../logger.js';
@@ -29,10 +30,12 @@ export class Upstream {
   private client: Client | null = null;
   private transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport | null = null;
   private connecting: Promise<Client> | null = null;
-  private chain: Promise<unknown> = Promise.resolve();
   private restartAttempts = 0;
   private restartTimer: NodeJS.Timeout | null = null;
   private used = false;
+  // M3.2 G12：并发信号量（默认 1 = 串行，R3 最安全）
+  private active = 0;
+  private waiters: Array<() => void> = [];
 
   constructor(
     def: ServerDef,
@@ -75,12 +78,15 @@ export class Upstream {
       { name: 'mcp-manager-gateway', version: '0.1.0' },
       { capabilities: {} },
     );
+    // S4：静态加密凭证在使用点解密（内存明文，不落盘）
+    const env = await decryptRecord(this.def.env);
+    const headers = await decryptRecord(this.def.headers);
     if (this.def.transport === 'stdio') {
       if (!this.def.command) throw new Error('stdio 上游缺少 command');
       this.transport = new StdioClientTransport({
         command: this.def.command,
         args: this.def.args ?? [],
-        env: { ...getDefaultEnvironment(), ...(this.def.env ?? {}) },
+        env: { ...getDefaultEnvironment(), ...(env ?? {}) },
         ...(this.def.cwd ? { cwd: this.def.cwd } : {}),
         stderr: 'pipe',
       });
@@ -88,15 +94,15 @@ export class Upstream {
       // M2.3：legacy SSE 上游（D4 兼容）
       if (!this.def.url) throw new Error('sse 上游缺少 url');
       this.transport = new SSEClientTransport(new URL(this.def.url), {
-        eventSourceInit: { fetch: (input, init) => fetch(input, { ...init, headers: { ...(this.def.headers ?? {}) } }) },
-        requestInit: { headers: { ...(this.def.headers ?? {}) } },
+        eventSourceInit: { fetch: (input, init) => fetch(input, { ...init, headers: { ...(headers ?? {}) } }) },
+        requestInit: { headers: { ...(headers ?? {}) } },
       });
     } else {
       if (!this.def.url) throw new Error('http 上游缺少 url');
       this.transport = new StreamableHTTPClientTransport(new URL(this.def.url), {
         requestInit: {
           headers: {
-            ...(this.def.headers ?? {}),
+            ...(headers ?? {}),
           },
         },
       });
@@ -156,21 +162,42 @@ export class Upstream {
     return tools;
   }
 
-  /** 工具调用；stdio 上游串行化 */
+  /** 工具调用；stdio 上游按 concurrency 信号量限流（默认串行） */
   async callTool(toolName: string, args: Record<string, unknown> | undefined): Promise<unknown> {
-    const run = async (): Promise<unknown> => {
+    if (this.def.transport !== 'stdio') {
       const client = await this.ensureClient();
-      const res = await withTimeout(
+      return withTimeout(
         client.callTool({ name: toolName, arguments: args ?? {} }),
         CALL_TIMEOUT_MS,
         `工具 ${toolName} 调用超时`,
       );
-      return res;
-    };
-    if (this.def.transport !== 'stdio') return run();
-    const task = this.chain.then(run, run);
-    this.chain = task.catch(() => {});
-    return task;
+    }
+    await this.acquire();
+    try {
+      const client = await this.ensureClient();
+      return await withTimeout(
+        client.callTool({ name: toolName, arguments: args ?? {} }),
+        CALL_TIMEOUT_MS,
+        `工具 ${toolName} 调用超时`,
+      );
+    } finally {
+      this.release();
+    }
+  }
+
+  private async acquire(): Promise<void> {
+    const limit = Math.max(1, this.def.concurrency ?? 1);
+    if (this.active < limit) {
+      this.active += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active += 1;
+  }
+
+  private release(): void {
+    this.active -= 1;
+    this.waiters.shift()?.();
   }
 
   async health(): Promise<boolean> {

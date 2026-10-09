@@ -1,14 +1,17 @@
 import { randomBytes } from 'node:crypto';
 import {
   applyImport,
+  decryptRecord,
   deleteServer,
   detectEnvironment,
+  encryptRecord,
   importPreview,
+  registryEntryToServerInput,
   removeBinding,
   setBinding,
   upsertServer,
 } from '@mcp-manager/core';
-import type { AgentType, UpsertServerInput } from '@mcp-manager/core';
+import type { AgentType, ServerDef, UpsertServerInput } from '@mcp-manager/core';
 import { z } from 'zod';
 import type { Daemon } from './daemon.js';
 import { sendError, sendJson } from './http-util.js';
@@ -27,6 +30,7 @@ const serverInputObject = z.object({
   gatewayMode: z.boolean().optional(),
   enabled: z.boolean().optional(),
   toolOverrides: z.record(z.object({ enabled: z.boolean() })).optional(),
+  concurrency: z.number().int().min(1).max(16).optional(),
 });
 
 /** 创建/整体更新：传输类型与必需字段匹配 */
@@ -108,22 +112,33 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
   });
 
   // —— 注册表 CRUD ——
+  // S4：env/headers 静态加密（存时加密、读时解密；保护 config.json 落盘）
+  const decryptForDisplay = async (def: ServerDef): Promise<ServerDef> => ({
+    ...def,
+    env: { ...(await decryptRecord(def.env)) },
+    headers: { ...(await decryptRecord(def.headers)) },
+  });
+
   router.get('/api/servers', async (ctx) => {
-    sendJson(ctx.res, 200, { servers: daemon.config.servers });
+    const servers = await Promise.all(daemon.config.servers.map((s) => decryptForDisplay(s)));
+    sendJson(ctx.res, 200, { servers });
   });
 
   router.post('/api/servers', async (ctx) => {
     const parsed = serverInputSchema.safeParse(await ctx.body());
     if (!parsed.success) return sendError(ctx.res, 400, formatZodIssues(parsed.error));
-    const def = upsertServer(daemon.config, parsed.data as UpsertServerInput);
+    const input = parsed.data as UpsertServerInput;
+    input.env = await encryptRecord(input.env);
+    input.headers = await encryptRecord(input.headers);
+    const def = upsertServer(daemon.config, input);
     await save();
-    sendJson(ctx.res, 201, { server: def });
+    sendJson(ctx.res, 201, { server: await decryptForDisplay(def) });
   });
 
   router.get('/api/servers/:id', async (ctx) => {
     const def = daemon.config.servers.find((s) => s.id === ctx.params['id']);
     if (!def) return sendError(ctx.res, 404, 'server 不存在');
-    sendJson(ctx.res, 200, { server: def });
+    sendJson(ctx.res, 200, { server: await decryptForDisplay(def) });
   });
 
   router.patch('/api/servers/:id', async (ctx) => {
@@ -132,9 +147,12 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
     if (!def) return sendError(ctx.res, 404, 'server 不存在');
     const parsed = serverInputObject.partial().safeParse(await ctx.body());
     if (!parsed.success) return sendError(ctx.res, 400, formatZodIssues(parsed.error));
-    upsertServer(daemon.config, { ...parsed.data, id, name: parsed.data.name ?? def.name, transport: parsed.data.transport ?? def.transport });
+    const input = parsed.data as UpsertServerInput;
+    input.env = await encryptRecord(input.env);
+    input.headers = await encryptRecord(input.headers);
+    upsertServer(daemon.config, { ...input, id, name: input.name ?? def.name, transport: input.transport ?? def.transport });
     await save();
-    sendJson(ctx.res, 200, { server: daemon.config.servers.find((s) => s.id === id) });
+    sendJson(ctx.res, 200, { server: await decryptForDisplay(daemon.config.servers.find((s) => s.id === id)!) });
   });
 
   router.delete('/api/servers/:id', async (ctx) => {
@@ -217,6 +235,23 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
     sendJson(ctx.res, 200, { lines: daemon.upstreamLogs?.(id) ?? [] });
   });
 
+  // M3.1 调试台（S6）：不经 agent 直接调用工具
+  router.post('/api/servers/:id/invoke', async (ctx) => {
+    const id = ctx.params['id']!;
+    const body = (await ctx.body()) as { tool?: string; arguments?: Record<string, unknown> };
+    if (!body.tool) return sendError(ctx.res, 400, '缺少 tool');
+    if (!daemon.config.servers.some((s) => s.id === id)) {
+      return sendError(ctx.res, 404, 'server 不存在');
+    }
+    if (daemon.invokeTool === undefined) return sendError(ctx.res, 503, 'gateway 未启用', 'GATEWAY_DOWN');
+    try {
+      const result = await daemon.invokeTool(id, body.tool, body.arguments ?? {});
+      sendJson(ctx.res, 200, { result });
+    } catch (err) {
+      sendError(ctx.res, 502, String((err as Error).message ?? err));
+    }
+  });
+
   // —— 日志 ——
   router.get('/api/logs/calls', async (ctx) => {
     sendJson(ctx.res, 200, { calls: daemon.recentCalls?.() ?? [] });
@@ -262,6 +297,26 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
       token: daemon.config.settings.token,
       resyncRequired: daemon.config.bindings.length > 0,
     });
+  });
+
+  // M3.6 S7：官方 registry 搜索代理 + 建议映射
+  router.get('/api/registry/search', async (ctx) => {
+    const q = ctx.query.get('q')?.trim() ?? '';
+    if (q === '') return sendError(ctx.res, 400, '缺少搜索词 q');
+    try {
+      const res = await fetch(
+        `https://registry.modelcontextprotocol.io/v0/servers?search=${encodeURIComponent(q)}&limit=20`,
+        { signal: AbortSignal.timeout(8000) },
+      );
+      if (!res.ok) return sendError(ctx.res, 502, `registry 返回 ${res.status}`);
+      const data = (await res.json()) as { servers?: Array<Record<string, unknown>> };
+      const entries = (data.servers ?? []).map((e) => (e['server'] ?? e) as Record<string, unknown>);
+      sendJson(ctx.res, 200, {
+        servers: entries.map((e) => registryEntryToServerInput(e)),
+      });
+    } catch (err) {
+      sendError(ctx.res, 502, `registry 不可达: ${String((err as Error).message ?? err).slice(0, 120)}`);
+    }
   });
 
   // —— 网关 ——

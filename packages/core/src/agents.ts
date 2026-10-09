@@ -7,8 +7,10 @@ import {
   denormalizeOpencode,
   denormalizeUrlOrCommand,
   normalizeClaudeStyle,
+  normalizeGeminiStyle,
   normalizeOpencode,
   normalizeUrlOrCommand,
+  denormalizeGeminiStyle,
 } from './adapters/json-adapter.js';
 import type { AgentAdapter } from './adapters/types.js';
 import type { AgentType } from './types.js';
@@ -68,12 +70,52 @@ export function makeAgents(baseDir?: string): Record<AgentType, AgentDefinition>
     denormalize: denormalizeOpencode,
   });
 
+  // M3.5：Claude Desktop（路径随平台不同）
+  const claudeDesktopConfig =
+    process.platform === 'win32'
+      ? path.join(process.env['APPDATA'] ?? p('AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
+      : process.platform === 'darwin'
+        ? p('Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+        : p('.config', 'Claude', 'claude_desktop_config.json');
+  const claudeDesktop = new JsonAgentAdapter({
+    type: 'claude-desktop',
+    displayName: 'Claude Desktop',
+    transports: ['stdio', 'http', 'sse'],
+    paths: [claudeDesktopConfig],
+    containerKey: 'mcpServers',
+    normalize: normalizeClaudeStyle,
+    denormalize: denormalizeClaudeStyle,
+  });
+
+  const windsurf = new JsonAgentAdapter({
+    type: 'windsurf',
+    displayName: 'Windsurf',
+    transports: ['stdio', 'http'],
+    paths: [p('.codeium', 'windsurf', 'mcp_config.json')],
+    containerKey: 'mcpServers',
+    normalize: normalizeUrlOrCommand,
+    denormalize: denormalizeUrlOrCommand,
+  });
+
+  const geminiCli = new JsonAgentAdapter({
+    type: 'gemini-cli',
+    displayName: 'Gemini CLI',
+    transports: ['stdio', 'http'],
+    paths: [p('.gemini', 'settings.json')],
+    containerKey: 'mcpServers',
+    normalize: normalizeGeminiStyle,
+    denormalize: denormalizeGeminiStyle,
+  });
+
   return {
     'claude-code': { type: 'claude-code', displayName: 'Claude Code', adapter: claudeCode },
     codex: { type: 'codex', displayName: 'Codex CLI', adapter: codex },
     cursor: { type: 'cursor', displayName: 'Cursor', adapter: cursor },
     trae: { type: 'trae', displayName: 'Trae', adapter: trae },
     opencode: { type: 'opencode', displayName: 'OpenCode', adapter: opencode },
+    'claude-desktop': { type: 'claude-desktop', displayName: 'Claude Desktop', adapter: claudeDesktop },
+    windsurf: { type: 'windsurf', displayName: 'Windsurf', adapter: windsurf },
+    'gemini-cli': { type: 'gemini-cli', displayName: 'Gemini CLI', adapter: geminiCli },
   };
 }
 

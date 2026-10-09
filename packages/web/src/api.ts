@@ -86,6 +86,20 @@ export interface ServerDefDTO {
   gatewayMode: boolean;
   enabled: boolean;
   toolOverrides?: Record<string, { enabled: boolean }>;
+  concurrency?: number;
+}
+
+export interface RegistrySuggestion {
+  name: string;
+  description: string;
+  suggestion: {
+    name: string;
+    transport: 'stdio' | 'http' | 'sse';
+    command?: string;
+    args?: string[];
+    url?: string;
+    gatewayMode: boolean;
+  } | null;
 }
 
 export interface SyncReport {

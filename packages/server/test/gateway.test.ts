@@ -361,4 +361,41 @@ describe('gateway aggregate endpoint (I-GW)', () => {
     expect(res.content[0]!.text).toBe('sse:sse_tool');
     await client.close();
   });
+
+  it('M3.3 per-agent 分组端点：agent 只看到自己绑定的网关 server', async () => {
+    // fs-a 绑定到 cursor；fs-b 不绑定
+    await api('PUT', '/api/bindings/cursor/fs-a');
+
+    const cursorClient = await connectClient('/agents/cursor/mcp');
+    const cursorTools = (await cursorClient.listTools()).tools.map((t) => t.name).sort();
+    // 作用域内只有 fs-a → 无冲突 → 无前缀
+    expect(cursorTools).toEqual(['add', 'echo', 'env']);
+    const res = (await cursorClient.callTool({ name: 'echo', arguments: { message: 'scoped' } })) as {
+      content: Array<{ text: string }>;
+    };
+    expect(res.content[0]!.text).toBe('echo: scoped');
+    await cursorClient.close();
+
+    // claude-code 无绑定 → 空工具列表
+    const emptyClient = await connectClient('/agents/claude-code/mcp');
+    const emptyTools = (await emptyClient.listTools()).tools;
+    expect(emptyTools).toEqual([]);
+    await emptyClient.close();
+  });
+
+  it('M3.1 调试台：不经 agent 直接调用工具（S6）', async () => {
+    const res = await api('POST', '/api/servers/fs-a/invoke', {
+      tool: 'echo',
+      arguments: { message: 'from-debug-console' },
+    });
+    expect(res.status).toBe(200);
+    const result = res.data.result as { content: Array<{ text: string }> };
+    expect(result.content[0]!.text).toBe('echo: from-debug-console');
+    // 调用也进入日志（scope=debug）
+    const calls = (await api('GET', '/api/logs/calls')).data.calls as Array<{ scope: string; tool: string }>;
+    expect(calls.some((c) => c.scope === 'debug' && c.tool === 'echo')).toBe(true);
+
+    const missing = await api('POST', '/api/servers/fs-a/invoke', { tool: 'nope', arguments: {} });
+    expect(missing.status).toBe(502);
+  });
 });

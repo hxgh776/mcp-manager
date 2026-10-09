@@ -68,6 +68,8 @@ export class Daemon {
   probeTools?: (id: string) => Promise<Array<{ name: string; description?: string; enabled: boolean }> | null>;
   upstreamLogs?: (id: string) => string[];
   recentCalls?: () => unknown[];
+  /** M3.1 调试台（S6） */
+  invokeTool?: (id: string, tool: string, args: Record<string, unknown>) => Promise<unknown>;
 
   private httpServer?: http.Server;
   private startedAt = Date.now();
@@ -170,8 +172,12 @@ export class Daemon {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pathname = url.pathname;
     try {
-      // 1) MCP 网关端点（M1.5 注入）
-      if (pathname === '/mcp' || /^\/servers\/[^/]+\/mcp$/.test(pathname)) {
+      // 1) MCP 网关端点（含 per-server 与 per-agent 分组端点）
+      if (
+        pathname === '/mcp' ||
+        pathname.startsWith('/servers/') ||
+        pathname.startsWith('/agents/')
+      ) {
         if (this.gatewayHttpHandler) {
           const handled = await this.gatewayHttpHandler(req, res, pathname, url.searchParams);
           if (handled) return;

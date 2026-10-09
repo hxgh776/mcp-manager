@@ -29,9 +29,10 @@ export function isToolEnabled(def: ServerDef, toolName: string): boolean {
 }
 
 /**
- * 聚合 MCP server（G1/G3/G4/G5）。
+ * 聚合 MCP server（G1/G3/G4/G5/G13）。
  *
- * - tools/list：合并所有就绪上游；冲突工具名加 `serverId__` 前缀（映射表供调用路由）；
+ * - tools/list：合并所有就绪上游（可按 filter 过滤，用于 per-agent 分组端点）；
+ *   冲突工具名加 `serverId__` 前缀（映射表供调用路由）；
  *   被停用的工具直接从列表剔除（上下文成本控制）；
  * - tools/call：经映射路由回上游；未知工具回退 `serverId__tool` 前缀解析；
  * - 单上游失败不影响其余（Promise.allSettled），错误记日志。
@@ -40,6 +41,7 @@ export function createAggregateServer(mgr: UpstreamManager, opts: {
   scope: string;
   onCall: (record: CallRecord) => void;
   toolIndex: Map<string, ToolIndexEntry>;
+  filter?: (def: { id: string }) => boolean;
 }): Server {
   const server = new Server(
     { name: 'mcp-manager', version: '0.1.0' },
@@ -49,6 +51,7 @@ export function createAggregateServer(mgr: UpstreamManager, opts: {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const upstreams = mgr
       .aggregateDefs()
+      .filter((d) => opts.filter === undefined || opts.filter(d))
       .map((d) => mgr.get(d.id))
       .filter((u): u is Upstream => u !== undefined);
 

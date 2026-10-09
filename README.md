@@ -69,8 +69,13 @@ cd e2e && pnpm i && npx playwright install chromium && pnpm test   # E2E 冒烟
 | Cursor | `~/.cursor/mcp.json` | JSON | ✅ |
 | Trae | `~/.trae/mcp.json`（国内版 `~/.trae-cn/`） | JSON | ✅ |
 | OpenCode | `~/.config/opencode/opencode.json`（键 `mcp`） | JSON（local/remote） | ✅ |
+| Claude Desktop | 分平台 `claude_desktop_config.json` | JSON | ✅ |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | JSON | ✅ |
+| Gemini CLI | `~/.gemini/settings.json`（httpUrl/sse） | JSON | ✅（经反向桥） |
 
 ## 当前状态（M1）
 
-- ✅ M1.0–M1.7 全部里程碑完成，48 个单元/集成测试全绿（含真实子进程与 HTTP 上游的网关全链路）
-- ⏳ M2 规划：SSE 兼容、HTTP→stdio 反向桥（Codex 网关）、per-agent 分组端点、凭证加密（OS keychain）、registry 发现、调试台
+- ✅ M1 + M2 + M3 完成，65 个单元/集成测试全绿
+  - M2：stdio 反向桥（Codex 网关打通）、SSE 上游兼容、环境检测、token 轮换提醒、工具并发度
+  - M3：调试台（不经 agent 直接调用工具）、per-agent 分组端点（`/agents/:type/mcp`）、凭证静态加密（Windows DPAPI）、Claude Desktop/Windsurf/Gemini CLI 适配器、registry 发现
+- ⏳ M4 规划：项目级作用域、VS Code 适配器、macOS Keychain/Linux libsecret 加密、per-client 隔离

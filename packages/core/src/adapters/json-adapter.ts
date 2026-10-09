@@ -283,6 +283,38 @@ export function denormalizeOpencode(entry: RawServerEntry): Record<string, unkno
   return clean({ type: 'remote', url: entry.url, headers: entry.headers });
 }
 
+/** Gemini CLI 风格：{ command,args,env } / { httpUrl }（streamable http）/ { url }（sse） */
+export function normalizeGeminiStyle(raw: unknown): RawServerEntry | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r['httpUrl'] === 'string') {
+    return { transport: 'http', url: r['httpUrl'], headers: toStringRecord(r['headers']) };
+  }
+  if (typeof r['url'] === 'string') {
+    return { transport: 'sse', url: r['url'], headers: toStringRecord(r['headers']) };
+  }
+  if (typeof r['command'] === 'string') {
+    return {
+      transport: 'stdio',
+      command: r['command'],
+      args: toStringArray(r['args']),
+      env: toStringRecord(r['env']),
+      cwd: typeof r['cwd'] === 'string' ? r['cwd'] : undefined,
+    };
+  }
+  return null;
+}
+
+export function denormalizeGeminiStyle(entry: RawServerEntry): Record<string, unknown> {
+  if (entry.transport === 'stdio') {
+    return clean({ command: entry.command, args: entry.args, env: entry.env, cwd: entry.cwd });
+  }
+  if (entry.transport === 'sse') {
+    return clean({ url: entry.url, headers: entry.headers });
+  }
+  return clean({ httpUrl: entry.url, headers: entry.headers });
+}
+
 function toStringArray(v: unknown): string[] | undefined {
   return Array.isArray(v) ? v.map(String) : undefined;
 }
