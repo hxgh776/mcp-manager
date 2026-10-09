@@ -135,7 +135,7 @@ export function GatewayPage() {
                 <tr key={a.agentType} className="border-b border-slate-100">
                   <td className="py-2 font-medium">{a.displayName}</td>
                   <td className="py-2">
-                    <code className="rounded bg-slate-100 px-2 py-1 text-xs">
+                    <code className="block break-all rounded bg-slate-100 px-2 py-1 text-xs">
                       http://127.0.0.1:{status.data?.port}/agents/{a.agentType}/mcp
                     </code>
                   </td>

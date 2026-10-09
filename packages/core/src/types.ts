@@ -69,6 +69,8 @@ export interface Settings {
   tokenRotatedAt?: string;
   /** D7：访问令牌开关。默认 false（仅环回监听兜底）；开启后 /api 与网关要求 Bearer token。 */
   authRequired?: boolean;
+  /** M3.6：官方 registry 基地址（默认 registry.modelcontextprotocol.io；可换镜像）。 */
+  registryBaseUrl?: string;
 }
 
 export interface ManagerConfig {

@@ -6,6 +6,7 @@ import {
   detectEnvironment,
   encryptRecord,
   importPreview,
+  npmSearchToSuggestions,
   registryEntryToServerInput,
   removeBinding,
   setBinding,
@@ -316,24 +317,55 @@ export function registerApiRoutes(router: Router, daemon: Daemon): void {
     });
   });
 
-  // M3.6 S7：官方 registry 搜索代理 + 建议映射
+  // M3.6 S7：registry 搜索——官方源优先，不可达时自动回退 npm 搜索
+  const OFFICIAL_REGISTRY = 'https://registry.modelcontextprotocol.io';
   router.get('/api/registry/search', async (ctx) => {
     const q = ctx.query.get('q')?.trim() ?? '';
     if (q === '') return sendError(ctx.res, 400, '缺少搜索词 q');
+    const base = daemon.config.settings.registryBaseUrl?.trim() || OFFICIAL_REGISTRY;
+    const failures: string[] = [];
+
     try {
       const res = await fetch(
-        `https://registry.modelcontextprotocol.io/v0/servers?search=${encodeURIComponent(q)}&limit=20`,
-        { signal: AbortSignal.timeout(8000) },
+        `${base}/v0/servers?search=${encodeURIComponent(q)}&limit=20`,
+        { signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json' } },
       );
-      if (!res.ok) return sendError(ctx.res, 502, `registry 返回 ${res.status}`);
-      const data = (await res.json()) as { servers?: Array<Record<string, unknown>> };
-      const entries = (data.servers ?? []).map((e) => (e['server'] ?? e) as Record<string, unknown>);
-      sendJson(ctx.res, 200, {
-        servers: entries.map((e) => registryEntryToServerInput(e)),
-      });
+      if (!res.ok) {
+        failures.push(`官方 registry(${base}) 返回 ${res.status}`);
+      } else {
+        const data = (await res.json()) as { servers?: Array<Record<string, unknown>> };
+        const entries = (data.servers ?? []).map((e) => (e['server'] ?? e) as Record<string, unknown>);
+        const servers = entries.map((e) => {
+          const s = registryEntryToServerInput(e);
+          return { ...s, source: 'official' as const };
+        });
+        return sendJson(ctx.res, 200, { servers, source: 'official' });
+      }
     } catch (err) {
-      sendError(ctx.res, 502, `registry 不可达: ${String((err as Error).message ?? err).slice(0, 120)}`);
+      failures.push(`官方 registry(${base}) 不可达: ${String((err as Error).message ?? err).slice(0, 80)}`);
     }
+
+    // 回退：npm 搜索（registry.npmjs.org 的 -/v1/search）
+    try {
+      const res = await fetch(
+        `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(q)}&size=20`,
+        { signal: AbortSignal.timeout(10_000) },
+      );
+      if (!res.ok) {
+        failures.push(`npm 搜索返回 ${res.status}`);
+      } else {
+        const data = (await res.json()) as Parameters<typeof npmSearchToSuggestions>[0];
+        return sendJson(ctx.res, 200, { servers: npmSearchToSuggestions(data), source: 'npm', notes: failures });
+      }
+    } catch (err) {
+      failures.push(`npm 搜索不可达: ${String((err as Error).message ?? err).slice(0, 80)}`);
+    }
+
+    sendError(
+      ctx.res,
+      502,
+      `所有数据源均不可达（${failures.join('；')}）。官方 registry 可能需要网络代理，或在设置中配置镜像地址。`,
+    );
   });
 
   // —— 网关 ——

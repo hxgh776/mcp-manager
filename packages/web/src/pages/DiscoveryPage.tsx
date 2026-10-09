@@ -9,17 +9,19 @@ export function DiscoveryPage() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<string | null>(null);
+  const [source, setSource] = useState<'official' | 'npm' | null>(null);
   const [results, setResults] = useState<RegistrySuggestion[] | null>(null);
 
   const search = useMutation({
     mutationFn: async (q: string) => {
-      const res = await api.get<{ servers: RegistrySuggestion[] }>(
+      const res = await api.get<{ servers: RegistrySuggestion[]; source?: 'official' | 'npm' }>(
         `/api/registry/search?q=${encodeURIComponent(q)}`,
       );
-      return res.servers;
+      return res;
     },
-    onSuccess: (servers) => {
-      setResults(servers);
+    onSuccess: (res) => {
+      setResults(res.servers);
+      setSource(res.source ?? null);
       setError(null);
     },
     onError: (e) => setError(String((e as Error).message)),
@@ -43,7 +45,8 @@ export function DiscoveryPage() {
       )}
       <Card title="MCP Registry 发现（S7）">
         <p className="mb-3 text-xs text-slate-400">
-          搜索官方 MCP Registry（registry.modelcontextprotocol.io），一键以网关模式添加。
+          默认搜索官方 MCP Registry（registry.modelcontextprotocol.io）；该源不可达时自动回退 npm 搜索
+          （结果以 <Badge tone="blue">npm</Badge> 标注，npx 型、默认网关模式）。
         </p>
         <form
           className="flex gap-2"
@@ -57,16 +60,20 @@ export function DiscoveryPage() {
             className={inputCls}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="例如：filesystem、github、notion…"
+            placeholder="例如：context7、filesystem、notion…"
           />
           <Btn kind="primary" disabled={search.isPending} onClick={() => query.trim() !== '' && search.mutate(query.trim())}>
-            搜索
+            {search.isPending ? '搜索中…（最长约 25s）' : '搜索'}
           </Btn>
         </form>
       </Card>
 
       {results !== null && (
         <Card title={`结果（${results.length}）`}>
+          <div className="mb-2">
+            {source === 'npm' && <Badge tone="amber">来源：npm 搜索回退（官方 registry 当前不可达）</Badge>}
+            {source === 'official' && <Badge tone="green">来源：官方 registry</Badge>}
+          </div>
           {results.length === 0 ? (
             <p className="text-sm text-slate-500">没有匹配的 server。</p>
           ) : (

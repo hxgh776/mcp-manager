@@ -26,6 +26,8 @@ export interface RegistrySuggestion {
   name: string;
   description: string;
   suggestion: UpsertServerInput | null;
+  /** 结果来源：official=官方 registry；npm=npm 搜索回退 */
+  source?: 'official' | 'npm';
 }
 
 export function registryEntryToServerInput(entry: RegistryServerEntry): RegistrySuggestion {
@@ -75,4 +77,33 @@ export function registryEntryToServerInput(entry: RegistryServerEntry): Registry
 function shortName(full: string): string {
   const base = full.split('/').at(-1) ?? full;
   return base.replace(/^mcp-/, '') || full;
+}
+
+/**
+ * npm 搜索回退（官方 registry API 在部分网络不可达时）：
+ * registry.npmjs.org / registry.npmmirror.com 的 -/v1/search 结果 → 建议（npx 型，网关模式）。
+ */
+export function npmSearchToSuggestions(
+  data: { objects?: Array<{ package?: { name?: string; description?: string; version?: string } }> },
+): RegistrySuggestion[] {
+  const out: RegistrySuggestion[] = [];
+  for (const obj of data.objects ?? []) {
+    const pkg = obj.package;
+    if (pkg?.name === undefined) continue;
+    out.push({
+      name: pkg.name,
+      description: [pkg.description, pkg.version !== undefined ? `v${pkg.version}` : '']
+        .filter((s) => s !== undefined && s !== '')
+        .join(' · '),
+      suggestion: {
+        name: pkg.name,
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', pkg.name],
+        gatewayMode: true,
+      },
+      source: 'npm',
+    });
+  }
+  return out;
 }

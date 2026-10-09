@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_LIST } from '../src/agents.js';
 import { denormalizeGeminiStyle, normalizeGeminiStyle } from '../src/adapters/json-adapter.js';
 import { decryptSecret, encryptSecret } from '../src/secretbox.js';
-import { registryEntryToServerInput } from '../src/registry-discovery.js';
+import { npmSearchToSuggestions, registryEntryToServerInput } from '../src/registry-discovery.js';
 
 describe('M3.4 S4 凭证加密', () => {
   it.skipIf(process.platform !== 'win32')('DPAPI 加密→解密往返，密文非明文', async () => {
@@ -80,5 +80,27 @@ describe('M3.6 registry 条目映射（S7）', () => {
   it('无法识别的条目 → suggestion 为 null', () => {
     const s = registryEntryToServerInput({ name: 'weird' });
     expect(s.suggestion).toBeNull();
+  });
+
+  it('npm 搜索回退映射：package → npx 型建议（网关模式）', () => {
+    const suggestions = npmSearchToSuggestions({
+      objects: [
+        { package: { name: '@upstash/context7-mcp', description: 'Up-to-date code docs', version: '4.2.0' } },
+        { package: {} },
+      ],
+    });
+    expect(suggestions).toHaveLength(1);
+    expect(suggestions[0]).toMatchObject({
+      name: '@upstash/context7-mcp',
+      description: 'Up-to-date code docs · v4.2.0',
+      source: 'npm',
+    });
+    expect(suggestions[0]!.suggestion).toEqual({
+      name: '@upstash/context7-mcp',
+      transport: 'stdio',
+      command: 'npx',
+      args: ['-y', '@upstash/context7-mcp'],
+      gatewayMode: true,
+    });
   });
 });

@@ -88,12 +88,14 @@ export function StatusPage() {
       >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
           {(agents.data?.agents ?? []).map((a) => (
-            <div key={a.agentType} data-testid={`agent-card-${a.agentType}`} className="rounded border border-slate-200 p-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-medium">{a.displayName}</span>
+            <div key={a.agentType} data-testid={`agent-card-${a.agentType}`} className="min-w-0 overflow-hidden rounded border border-slate-200 p-3">
+              <div className="mb-1 flex items-center justify-between gap-1">
+                <span className="truncate font-medium" title={a.displayName}>{a.displayName}</span>
                 {a.detected ? <Badge tone="green">已装</Badge> : <Badge tone="gray">未发现</Badge>}
               </div>
-              <div className="text-xs text-slate-400">{a.configPaths[0]}</div>
+              <div className="truncate text-xs text-slate-400" title={a.configPaths[0]}>
+                {a.configPaths[0]}
+              </div>
               <div className="mt-2 text-xs text-slate-500">
                 绑定 {a.boundServerIds.length} 个 server
               </div>

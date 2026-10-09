@@ -46,6 +46,7 @@ const configSchema = z.object({
     logLevel: z.enum(['debug', 'info', 'warn', 'error']),
     tokenRotatedAt: z.string().optional(),
     authRequired: z.boolean().optional(),
+    registryBaseUrl: z.string().optional(),
   }),
 });
 
